@@ -64,7 +64,7 @@ HOME_OPS_PATTERNS = [
     r"\btechnician\b",
     r"\bplumber\b",
     r"\belectrician\b",
-    r"\bhvac\b",
+    r"\bhvac (?:technician|contractor|repair|service|company|specialist|pro)\b",
     r"\bmechanic\b",
     r"\blandscap(?:e|er|ing)\b",
     r"\barborist\b",
@@ -80,6 +80,12 @@ COVERAGE_PATTERNS = [
     r"\binsurance\b",
     r"\bclaim\b",
     r"\breceipt\b",
+    r"\bcontract\b",
+    r"\bservice call fee\b",
+    r"\boptional coverage\b",
+    r"\bproof of purchase\b",
+    r"\beffective date\b",
+    r"\bexclusions?\b",
 ]
 
 TROUBLESHOOTING_REGEXES = [re.compile(p, re.IGNORECASE) for p in TROUBLESHOOTING_PATTERNS]

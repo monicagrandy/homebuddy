@@ -1,7 +1,10 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from backend.agents.troubleshooting import _troubleshooting_agent_node
+from backend.agents.troubleshooting import (
+    _build_retrieval_query,
+    _troubleshooting_agent_node,
+)
 
 
 def test_troubleshooting_agent_returns_response_to_synthesizer():
@@ -66,3 +69,24 @@ def test_troubleshooting_agent_preserves_contextual_answer():
 
     assert command.goto == "synthesizer"
     assert command.update["troubleshooting_response"][0]["response"] == "Check the drain filter and garbage disposal connection first."
+
+
+def test_build_retrieval_query_prefers_user_query_for_generic_task_descriptions():
+    user_query = "How do I set my thermostat to heat?"
+    task_desc = "Help the user troubleshoot the reported issue."
+
+    result = _build_retrieval_query(user_query, task_desc)
+
+    assert result == user_query
+
+
+def test_build_retrieval_query_appends_specific_focus_when_available():
+    user_query = "Why is my dishwasher not draining?"
+    task_desc = "Check likely causes related to the drain filter and garbage disposal connection."
+
+    result = _build_retrieval_query(user_query, task_desc)
+
+    assert result == (
+        "Why is my dishwasher not draining?\n"
+        "Focus: Check likely causes related to the drain filter and garbage disposal connection."
+    )

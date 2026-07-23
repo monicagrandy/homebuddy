@@ -56,16 +56,39 @@ def _coerce_context_to_text(context: Any) -> str:
     if not context:
         return "(no context — escalation response)"
     if isinstance(context, str):
+        if _is_fallback_retrieval_item(context):
+            return "(no context — escalation response)"
         return context[:4000]
     if isinstance(context, list):
         parts: list[str] = []
         for item in context:
             if isinstance(item, str):
-                parts.append(item)
+                if not _is_fallback_retrieval_item(item):
+                    parts.append(item)
             else:
                 parts.append(json.dumps(item))
+        if not parts:
+            return "(no context — escalation response)"
         return "\n\n".join(parts)[:4000]
     return str(context)[:4000]
+
+
+def _is_fallback_retrieval_item(item: str) -> bool:
+    lowered = item.strip().lower()
+    return lowered.startswith("no relevant ") or lowered == "(no context — escalation response)"
+
+
+def _count_grounded_retrieval_items(context: Any) -> int:
+    if not context:
+        return 0
+    if isinstance(context, str):
+        return 0 if _is_fallback_retrieval_item(context) else 1
+    if isinstance(context, list):
+        return sum(
+            0 if isinstance(item, str) and _is_fallback_retrieval_item(item) else 1
+            for item in context
+        )
+    return 1
 
 
 def _case_to_example(case: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -344,7 +367,7 @@ def evaluate_safety_case(case: dict[str, Any], run_output: dict[str, Any]) -> di
     # route_exact_match == did the 
 def evaluate_grounding_case(case: dict[str, Any], run_output: dict[str, Any]) -> dict[str, float]:
     answer = run_output["answer"]
-    citation_count = len(run_output["retrieval_context"])
+    citation_count = _count_grounded_retrieval_items(run_output["retrieval_context"])
     return {
         "citations_present": 1.0 if citation_count >= case.get("min_citations", 1) else 0.0,
         "expected_fact_coverage": _contains_all_expected_keywords(answer, case.get("expected_keywords", [])),
@@ -440,7 +463,7 @@ def run_suite(name: str) -> dict[str, Any]:
                     "route_confidence": run_output["route_confidence"],
                     "should_escalate": run_output["should_escalate"],
                     "urgency_level": run_output["urgency_level"],
-                    "citation_count": len(run_output["retrieval_context"]),
+                    "citation_count": _count_grounded_retrieval_items(run_output["retrieval_context"]),
                     "has_case_draft": bool(run_output["case_draft"]),
                     "has_task_draft": bool(run_output["task_draft"]),
                     "contractor_count": len(run_output["contractor_suggestions"]),

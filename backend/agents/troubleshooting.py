@@ -16,6 +16,11 @@ from backend.workflow.state import WorkerInput
 
 logger = get_logger(__name__)
 
+GENERIC_TASK_PREFIXES = (
+    "help the user troubleshoot",
+    "assist with troubleshooting",
+)
+
 def build_troubleshooting_subgraph(agent_llm, tools_by_name):
     def troubleshooting_model(state: AgentState) -> dict:
         response = agent_llm.invoke(state["messages"])
@@ -80,6 +85,21 @@ def _format_retrieval_matches(matches: list[dict]) -> str:
         )
     return "\n\n".join(parts)
 
+
+def _build_retrieval_query(user_query: str, task_desc: str | None) -> str:
+    """Prefer the real user question for retrieval, and only append task context when it adds specificity."""
+    normalized_task = (task_desc or "").strip()
+    lowered_task = normalized_task.lower()
+
+    if not normalized_task:
+        return user_query
+    if normalized_task == user_query:
+        return user_query
+    if any(lowered_task.startswith(prefix) for prefix in GENERIC_TASK_PREFIXES):
+        return user_query
+
+    return f"{user_query}\nFocus: {normalized_task}"
+
 def _troubleshooting_agent_node(state: WorkerInput) -> Command[Literal["synthesizer"]]:
     """Deterministically fetch the relevant troubleshooting docs before invoking the agent."""
     user_query = state.get("sanitized_query") or state["user_query"]
@@ -90,7 +110,7 @@ def _troubleshooting_agent_node(state: WorkerInput) -> Command[Literal["synthesi
     logger.info("Troubleshooting Agent task=%r", task_desc)
 
     engine = get_query_engine()
-    retrieval_query = task_desc if task_desc and task_desc != user_query else user_query
+    retrieval_query = _build_retrieval_query(user_query, task_desc)
 
     local_matches = engine.retrieve_local_documents(
         household_id=state["household_id"],
