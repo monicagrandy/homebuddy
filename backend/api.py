@@ -216,13 +216,31 @@ def _load_conversation_history(
     household_id: int,
     session_id: str,
 ) -> list[ConversationMessage]:
-    return session.scalars(
+    history = session.scalars(
         select(ConversationMessage)
         .where(
             ConversationMessage.household_id == household_id,
             ConversationMessage.session_id == session_id,
         )
         .order_by(ConversationMessage.id.desc()).limit(4)
+    ).all()
+    history.reverse()
+    return history
+
+
+def _load_full_conversation_history(
+    session: Session,
+    *,
+    household_id: int,
+    session_id: str,
+) -> list[ConversationMessage]:
+    return session.scalars(
+        select(ConversationMessage)
+        .where(
+            ConversationMessage.household_id == household_id,
+            ConversationMessage.session_id == session_id,
+        )
+        .order_by(ConversationMessage.id.asc())
     ).all()
 
 
@@ -302,7 +320,7 @@ def list_conversation_messages(
 ):
     user = _get_or_create_user(session, identity)
     _require_household_membership(session, user.id, household_id)
-    return _load_conversation_history(
+    return _load_full_conversation_history(
         session,
         household_id=household_id,
         session_id=session_id,

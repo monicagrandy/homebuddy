@@ -127,6 +127,31 @@ def clear_conversation_messages(session_id: str) -> None:
     )
 
 
+def build_conversation_pairs(messages: list[dict]) -> list[tuple[str | None, str | None]]:
+    """Convert a flat user/assistant message list into turn-based display pairs."""
+    pairs: list[tuple[str | None, str | None]] = []
+    pending_user_messages: list[str] = []
+
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content")
+
+        if role == "user":
+            pending_user_messages.append(content)
+            continue
+
+        if role == "assistant":
+            if pending_user_messages:
+                pairs.append((pending_user_messages.pop(0), content))
+            else:
+                pairs.append((None, content))
+
+    for pending_user_message in pending_user_messages:
+        pairs.append((pending_user_message, None))
+
+    return pairs
+
+
 def exchange_auth_code(code: str) -> dict:
     return post_json("/auth/exchange", {"code": code})
 
@@ -1310,21 +1335,37 @@ def render_chat_tab() -> None:
                 status_placeholder.empty()
                 st.error(str(exc))
 
-    conversation_pairs: list[tuple[str | None, str | None]] = []
-    current_user_message: str | None = None
-    for message in st.session_state.agent_messages:
-        if message["role"] == "user":
-            if current_user_message is not None:
-                conversation_pairs.append((current_user_message, None))
-            current_user_message = message["content"]
-        else:
-            conversation_pairs.append((current_user_message, message["content"]))
-            current_user_message = None
-    if current_user_message is not None:
-        conversation_pairs.append((current_user_message, None))
+    conversation_pairs = build_conversation_pairs(st.session_state.agent_messages)
 
     latest_turn = st.session_state.get("last_agent_turn")
-    if latest_turn:
+    for index, (user_message, assistant_message) in enumerate(reversed(conversation_pairs)):
+        if user_message:
+            st.markdown(
+                f"""
+                <div class="hb-card hb-compact-card">
+                    <div class="hb-partial-title">You Asked</div>
+                    {esc(user_message)}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        if assistant_message:
+            preview = re.sub(r"\s+", " ", assistant_message).strip()[:96] or "Assistant response"
+            is_latest_persisted_turn = (
+                latest_turn
+                and user_message == latest_turn.get("question")
+                and assistant_message == latest_turn.get("answer")
+            )
+            with st.expander(f"🤖 {preview}", expanded=index == 0):
+                st.markdown(assistant_message)
+                if is_latest_persisted_turn:
+                    render_contractor_suggestions(
+                        latest_turn.get("contractor_suggestions") or []
+                    )
+                    render_case_draft_hitl()
+                    render_task_draft_hitl()
+
+    if latest_turn and not conversation_pairs:
         st.markdown(
             f"""
             <div class="hb-card hb-compact-card">
@@ -1341,33 +1382,7 @@ def render_chat_tab() -> None:
             )
             render_case_draft_hitl()
             render_task_draft_hitl()
-
-    skipped_latest_turn = False
-    for index, (user_message, assistant_message) in enumerate(reversed(conversation_pairs)):
-        if (
-            latest_turn
-            and not skipped_latest_turn
-            and user_message == latest_turn.get("question")
-            and assistant_message == latest_turn.get("answer")
-        ):
-            skipped_latest_turn = True
-            continue
-        if user_message:
-            st.markdown(
-                f"""
-                <div class="hb-card hb-compact-card">
-                    <div class="hb-partial-title">You Asked</div>
-                    {esc(user_message)}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        if assistant_message:
-            preview = re.sub(r"\s+", " ", assistant_message).strip()[:96] or "Assistant response"
-            with st.expander(f"🤖 {preview}", expanded=index == 0 and latest_turn is None):
-                st.markdown(assistant_message)
-
-    if latest_turn is None:
+    elif latest_turn is None:
         render_case_draft_hitl()
         render_task_draft_hitl()
 
