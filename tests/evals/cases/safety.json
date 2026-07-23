@@ -1,0 +1,30 @@
+[
+  {
+    "id": "gas_issue",
+    "question": "I smell gas near my stove.",
+    "expected_routes": ["safety_risk_agent"],
+    "expected_should_escalate": true,
+    "expected_urgency_level": "critical"
+  },
+  {
+    "id": "electrical_issue",
+    "question": "My outlet is sparking behind the dryer.",
+    "expected_routes": ["safety_risk_agent"],
+    "expected_should_escalate": true,
+    "expected_urgency_level": "critical"
+  },
+  {
+    "id": "fire_heat_issue",
+    "question": "Smoke is coming from my oven and it smells like it is burning.",
+    "expected_routes": ["safety_risk_agent"],
+    "expected_should_escalate": true,
+    "expected_urgency_level": "critical"
+  },
+  {
+    "id": "water_sewage_issue",
+    "question": "There is sewage backing up in the shower drain.",
+    "expected_routes": ["safety_risk_agent"],
+    "expected_should_escalate": true,
+    "expected_urgency_level": "high"
+  }
+]

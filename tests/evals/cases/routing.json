@@ -1,0 +1,32 @@
+[
+  {
+    "id": "troubleshooting_thermostat_heat",
+    "question": "How do I set my thermostat to heat?",
+    "expected_routes": ["troubleshooting_agent"]
+  },
+  {
+    "id": "coverage_service_fee",
+    "question": "What is the service call fee on my home warranty contract?",
+    "expected_routes": ["coverage_and_warranty_agent"]
+  },
+  {
+    "id": "safety_smoke_from_oven",
+    "question": "What should I do if smoke is coming out of my oven?",
+    "expected_routes": ["safety_risk_agent"]
+  },
+  {
+    "id": "workflow_reminder_only",
+    "question": "Remind me tomorrow to follow up on my AC repair.",
+    "expected_routes": ["home_operations_agent"]
+  },
+  {
+    "id": "multi_agent_ac_and_hvac",
+    "question": "My AC is not working. Find an HVAC technician near 90032.",
+    "expected_routes": ["home_operations_agent", "troubleshooting_agent"]
+  },
+  {
+    "id": "out_of_scope_general_question",
+    "question": "What's the best movie this weekend?",
+    "expected_routes": []
+  }
+]

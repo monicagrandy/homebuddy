@@ -1,0 +1,60 @@
+[
+  {
+    "id": "nest_health_monitor_alerts",
+    "question": "What does HVAC System Health Monitor do on the Nest thermostat?",
+    "expected_routes": ["troubleshooting_agent"],
+    "expected_answer": "HVAC System Health Monitor can alert the homeowner by email or Google Home app notification when it detects warning signs that the heating or cooling system may have a problem.",
+    "reference_facts": [
+      "HVAC System Health Monitor can help homeowners identify potential HVAC issues.",
+      "Google Nest may send the homeowner an email alert or a Google Home app notification.",
+      "The alert explains which system, heating or cooling, may be affected."
+    ]
+  },
+  {
+    "id": "nest_urgent_vs_early_warning",
+    "question": "When does the Nest thermostat send an urgent alert versus an early warning alert?",
+    "expected_routes": ["troubleshooting_agent"],
+    "expected_answer": "An urgent alert is sent as soon as a serious problem is detected, while an early warning alert is sent within a week for issues that should be fixed soon.",
+    "reference_facts": [
+      "Urgent alerts are sent as soon as a problem is detected.",
+      "Early warning alerts are sent within a week of detecting an issue."
+    ]
+  },
+  {
+    "id": "contract_service_call_fee",
+    "question": "What is the service call fee on my contract?",
+    "expected_routes": ["coverage_and_warranty_agent"],
+    "expected_answer": "The service call fee on the contract is $95.00.",
+    "reference_facts": [
+      "The Home Warranty Summary page lists a Service Call Fee of $95.00."
+    ]
+  },
+  {
+    "id": "dishwasher_parts_coverage",
+    "question": "Does my warranty cover dishwasher parts?",
+    "expected_routes": ["coverage_and_warranty_agent"],
+    "expected_answer": "Yes. The kitchen appliance section says dishwasher parts are covered.",
+    "reference_facts": [
+      "Kitchen Appliances: Dishwasher: parts are covered."
+    ]
+  },
+  {
+    "id": "optional_coverage_window",
+    "question": "How long do I have to buy optional coverage after my contract starts?",
+    "expected_routes": ["coverage_and_warranty_agent"],
+    "expected_answer": "Optional coverage can be purchased up to 30 days from the contract effective date and is not effective until payment is received.",
+    "reference_facts": [
+      "Optional coverage may be purchased up to 30 days from the Contract Effective Date.",
+      "Such coverage is not effective until payment is received by the Company."
+    ]
+  },
+  {
+    "id": "thermostat_heating_coverage",
+    "question": "Does the warranty cover thermostat components for heating?",
+    "expected_routes": ["coverage_and_warranty_agent"],
+    "expected_answer": "Yes. The heating items section includes thermostats, including the base, as covered items.",
+    "reference_facts": [
+      "Heating items covered include thermostats, including base."
+    ]
+  }
+]
