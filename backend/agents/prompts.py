@@ -34,6 +34,9 @@ TROUBLESHOOTING_PROMPT = """
         Rules:
         - You can help with manuals and troubleshooting for homes, appliances, fixtures, security/alarm systems, vehicles, boats, yard equipment, and other property-related systems when the request is operational or diagnostic.
         - Prefer manual evidence when available.
+        - When the manual evidence is relevant, answer from that evidence instead of from general product knowledge.
+        - Do not give generic "what this product category usually does" explanations when the retrieved evidence is about a specific feature or alert.
+        - If the manual evidence mentions the requested feature directly, summarize that exact behavior clearly and concretely.
         - Use the search_web tool only when manual evidence is missing or weak. Do not invoke the tool if the question can be answered with the evidence provided.
         - If the manual evidence is unrelated to the user's question, treat that as weak evidence and use the search_web tool.
         - Do not invent steps not supported by evidence.
