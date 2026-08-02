@@ -1,0 +1,17 @@
+[
+  {
+    "label": "capabilities",
+    "question": "What can you help me with as a homeowner?",
+    "weight": 3
+  },
+  {
+    "label": "task_draft",
+    "question": "Create a reminder to replace my HVAC filter next month.",
+    "weight": 2
+  },
+  {
+    "label": "case_draft",
+    "question": "Draft a case for a dishwasher that keeps leaking under the door.",
+    "weight": 1
+  }
+]

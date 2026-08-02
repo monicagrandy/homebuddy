@@ -16,3 +16,6 @@ docs/*
 !docs/aws-lightsail-deploy.md
 /better-binder-skill/
 /test_alexa_handler.py
+/loadtests/users.json
+/loadtests/prompts.json
+/loadtests/reports/

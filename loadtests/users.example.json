@@ -1,0 +1,8 @@
+[
+  {
+    "label": "beta-user-1",
+    "access_token": "PASTE_A_REAL_COGNITO_ACCESS_TOKEN_HERE",
+    "household_id": 1,
+    "household_zip_code": "80202"
+  }
+]

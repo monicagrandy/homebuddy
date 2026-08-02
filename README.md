@@ -165,6 +165,27 @@ Optional judge-based evals:
 ENABLE_LLM_JUDGE_EVALS=true python tests/run_evals.py grounding
 ```
 
+## Load testing
+
+HomeBuddy now includes an automated Locust harness under
+[`loadtests/`](./loadtests/README.md).
+
+Recommended approach:
+
+- Load test the authenticated backend API first, not the Cognito hosted UI.
+- Use real beta-user bearer tokens in `loadtests/users.json`.
+- Run the harness headlessly so it returns a pass/fail exit code.
+- On Lightsail, run the load tester inside the Compose network so it can reach
+  the private `backend` service without exposing a new public port.
+
+Quick local example:
+
+```bash
+pip install -r requirements-loadtest.txt
+cp loadtests/users.example.json loadtests/users.json
+locust -f loadtests/locustfile.py --headless --host http://localhost:8000 --users 3 --spawn-rate 1 --run-time 2m --stop-timeout 30s
+```
+
 ## AWS deployment
 
 For the lowest-cost AWS starter path, see [docs/aws-lightsail-deploy.md](docs/aws-lightsail-deploy.md).
