@@ -2,7 +2,6 @@
 __pycache__/
 *.pyc
 .env
-.env.example
 .pytest_cache/
 .coverage
 .mypy_cache/
@@ -13,6 +12,7 @@ registry/db.json
 *.db-wal
 /chroma_db/
 /.deepeval/
-/docs/
+docs/*
+!docs/aws-lightsail-deploy.md
 /better-binder-skill/
 /test_alexa_handler.py

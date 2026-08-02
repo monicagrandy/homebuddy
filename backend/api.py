@@ -7,13 +7,14 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage
+from langsmith.run_helpers import tracing_context
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from langsmith import traceable
 
 from backend.auth import (
     AuthenticatedIdentity,
+    ensure_cognito_beta_access,
     exchange_auth_code_for_tokens,
     get_current_identity,
     validate_cognito_id_token,
@@ -86,22 +87,19 @@ def _ensure_document_schema():
 async def lifespan(app: FastAPI):
     tracing_enabled = settings.langsmith_tracing == True
     logger.info(f"Langsmith tracing enabled: {tracing_enabled}")
-    if settings.auth_disabled:
-        logger.warning("AUTH IS DISABLED — all requests use the dev identity. Never run alpha/production this way.")
-    else:
-        missing = [
-            name
-            for name, value in {
-                "COGNITO_ISSUER": settings.cognito_issuer,
-                "COGNITO_JWKS_URL": settings.cognito_jwks_url,
-                "COGNITO_APP_CLIENT_ID": settings.cognito_app_client_id,
-            }.items()
-            if not value
-        ]
-        if missing:
-            raise RuntimeError(
-                f"Auth is enabled but Cognito configuration is incomplete. Missing: {', '.join(missing)}"
-            )
+    missing = [
+        name
+        for name, value in {
+            "COGNITO_ISSUER": settings.cognito_issuer,
+            "COGNITO_JWKS_URL": settings.cognito_jwks_url,
+            "COGNITO_APP_CLIENT_ID": settings.cognito_app_client_id,
+        }.items()
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(
+            f"Cognito configuration is incomplete. Missing: {', '.join(missing)}"
+        )
     if settings.database_url.startswith("postgresql"):
         with engine.begin() as connection:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
@@ -111,6 +109,38 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+def _langsmith_trace_tags(*, identity: AuthenticatedIdentity, streamed: bool) -> list[str]:
+    tags = [
+        "homebuddy",
+        "auth:cognito",
+        "beta:gated" if settings.cognito_allowed_groups else "beta:open",
+        "query:stream" if streamed else "query:sync",
+    ]
+    tags.extend(f"group:{group}" for group in sorted(identity.groups))
+    return tags
+
+
+def _langsmith_trace_metadata(
+    *,
+    payload: QueryRequest,
+    identity: AuthenticatedIdentity,
+    user: User,
+    streamed: bool,
+) -> dict:
+    return {
+        "user_id": user.id,
+        "cognito_subject": identity.subject,
+        "cognito_email": user.email,
+        "cognito_groups": sorted(identity.groups),
+        "beta_gate_enabled": bool(settings.cognito_allowed_groups),
+        "query_mode": "stream" if streamed else "sync",
+        "household_id": payload.household_id,
+        "asset_id": payload.asset_id,
+        "entry_id": payload.entry_id,
+        "session_id": payload.session_id,
+    }
 
 
 def _as_datetime(value):
@@ -137,6 +167,7 @@ def _get_or_create_user(
     *,
     create_if_missing: bool = False,
 ) -> User:
+    ensure_cognito_beta_access(identity)
     user = session.scalar(select(User).where(User.cognito_sub == identity.subject))
     if user is None:
         if not create_if_missing:
@@ -785,15 +816,24 @@ def query(
                 session_id=payload.session_id,
             )
         )
-        result = service.run_query(
-            user_query=payload.question,
-            session_id=payload.session_id,
-            entry_id=payload.entry_id,
-            household_id=payload.household_id,
-            asset_id=payload.asset_id,
-            household_zip_code=payload.household_zip_code,
-            messages=prior_messages,
-        )
+        with tracing_context(
+            tags=_langsmith_trace_tags(identity=identity, streamed=False),
+            metadata=_langsmith_trace_metadata(
+                payload=payload,
+                identity=identity,
+                user=user,
+                streamed=False,
+            ),
+        ):
+            result = service.run_query(
+                user_query=payload.question,
+                session_id=payload.session_id,
+                entry_id=payload.entry_id,
+                household_id=payload.household_id,
+                asset_id=payload.asset_id,
+                household_zip_code=payload.household_zip_code,
+                messages=prior_messages,
+            )
         # Persist the PII-anonymized query, not the raw one, and skip blocked turns entirely.
         if not result.get("input_blocked"):
             _append_conversation_message(
@@ -840,12 +880,20 @@ def query_stream(
             session_id=payload.session_id,
         )
     )
+    trace_tags = _langsmith_trace_tags(identity=identity, streamed=True)
+    trace_metadata = _langsmith_trace_metadata(
+        payload=payload,
+        identity=identity,
+        user=user,
+        streamed=True,
+    )
 
     def event_stream():
         final_result = None
         sanitized_query = None
         with SessionLocal() as persist_session:
-                try:
+            try:
+                with tracing_context(tags=trace_tags, metadata=trace_metadata):
                     for event in service.stream_query(
                         user_query=payload.question,
                         session_id=payload.session_id,
@@ -874,43 +922,43 @@ def query_stream(
                                 content=final_result["answer"],
                             )
                         yield f"data: {json.dumps(jsonable_encoder(event))}\n\n"
-                except ValueError as exc:
-                    _append_conversation_message(
-                        persist_session,
-                                household_id=payload.household_id,
-                                session_id=payload.session_id,
-                                role="assistant",
-                                content=str(exc),
-                        )
-                    yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
-                except SafetyBlockError as exc:
-                        _append_conversation_message(
-                            persist_session,
-                            household_id=payload.household_id,
-                            session_id=payload.session_id,
-                            role="assistant",
-                            content=str(exc),
-                        )
-                        yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
-                except QueryEngineError as exc:
-                    _append_conversation_message(
-                        persist_session,
-                                household_id=payload.household_id,
-                                session_id=payload.session_id,
-                                role="assistant",
-                                content=str(exc),
-                        )
-                    yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
-                except Exception as exc:
-                    _append_conversation_message(
-                        persist_session,
-                                household_id=payload.household_id,
-                                session_id=payload.session_id,
-                                role="assistant",
-                                content=str(exc),
-                        )
-                    logger.exception("Streaming query failed")
-                    yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            except ValueError as exc:
+                _append_conversation_message(
+                    persist_session,
+                    household_id=payload.household_id,
+                    session_id=payload.session_id,
+                    role="assistant",
+                    content=str(exc),
+                )
+                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            except SafetyBlockError as exc:
+                _append_conversation_message(
+                    persist_session,
+                    household_id=payload.household_id,
+                    session_id=payload.session_id,
+                    role="assistant",
+                    content=str(exc),
+                )
+                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            except QueryEngineError as exc:
+                _append_conversation_message(
+                    persist_session,
+                    household_id=payload.household_id,
+                    session_id=payload.session_id,
+                    role="assistant",
+                    content=str(exc),
+                )
+                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            except Exception as exc:
+                _append_conversation_message(
+                    persist_session,
+                    household_id=payload.household_id,
+                    session_id=payload.session_id,
+                    role="assistant",
+                    content=str(exc),
+                )
+                logger.exception("Streaming query failed")
+                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
                
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

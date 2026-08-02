@@ -3,7 +3,7 @@ import json
 import os
 import re
 import uuid
-from urllib.parse import quote, unquote, urlencode
+from urllib.parse import urlencode
 
 import httpx
 import streamlit as st
@@ -21,20 +21,14 @@ COGNITO_APP_CLIENT_ID = os.getenv("COGNITO_APP_CLIENT_ID", "")
 COGNITO_REDIRECT_URI = os.getenv("COGNITO_REDIRECT_URI", "")
 COGNITO_LOGOUT_REDIRECT_URI = os.getenv("COGNITO_LOGOUT_REDIRECT_URI", "")
 COGNITO_SCOPE = os.getenv("COGNITO_SCOPE", "openid email phone")
+COGNITO_ALLOWED_GROUPS = tuple(
+    item.strip() for item in os.getenv("COGNITO_ALLOWED_GROUPS", "").split(",") if item.strip()
+)
 LANGCHAIN_TRACING = os.getenv("LANGCHAIN_TRACING_V2", "true")
+BETA_ACCESS_ERROR = "This account is not enabled for the HomeBuddy beta."
 
 def esc(value) -> str:
     return html.escape(str(value or ""))
-
-def _bool_env(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-AUTH_DISABLED = _bool_env("AUTH_DISABLED", False)
-AUTH_ID_COOKIE = "home_buddy_id_token"
-AUTH_ACCESS_COOKIE = "home_buddy_access_token"
 
 @st.cache_resource
 def get_api_client() -> httpx.Client:
@@ -49,6 +43,24 @@ def _read_backend_error(response: httpx.Response) -> str:
     if isinstance(payload, dict) and "detail" in payload:
         return str(payload["detail"])
     return str(payload)
+
+
+def _format_auth_error(exc: Exception) -> str:
+    message = str(exc).strip()
+    if not message:
+        return "Could not complete Cognito sign-in."
+    if message == BETA_ACCESS_ERROR:
+        return message
+    return f"Could not complete Cognito sign-in: {message}"
+
+
+def _format_session_restore_error(exc: Exception) -> str:
+    message = str(exc).strip()
+    if not message:
+        return "Your session expired. Please sign in again."
+    if message == BETA_ACCESS_ERROR:
+        return message
+    return f"Your session expired or could not be restored: {message}"
 
 
 def _request_headers() -> dict[str, str]:
@@ -165,6 +177,7 @@ def build_cognito_authorize_url() -> str | None:
             "client_id": COGNITO_APP_CLIENT_ID,
             "redirect_uri": COGNITO_REDIRECT_URI,
             "scope": COGNITO_SCOPE,
+            "prompt": "login",
         }
     )
     return f"{COGNITO_DOMAIN.rstrip('/')}/oauth2/authorize?{query}"
@@ -186,64 +199,6 @@ def clear_auth_query_params() -> None:
     for key in ("code", "state", "error", "error_description"):
         if key in st.query_params:
             del st.query_params[key]
-
-def _queue_auth_cookie_write(*, id_token: str, access_token: str) -> None:
-    st.session_state.auth_cookie_action = {
-        "action": "set",
-        "id_token": id_token,
-        "access_token": access_token,
-    }
-    st.session_state.auth_cookie_restore_blocked = False
-
-def _queue_auth_cookie_clear() -> None:
-    st.session_state.auth_cookie_action = {"action": "clear"}
-    st.session_state.auth_cookie_restore_blocked = True
-
-def _render_auth_cookie_bridge() -> None:
-    action = st.session_state.get("auth_cookie_action")
-    if not action:
-        return
-
-    if action["action"] == "set":
-        id_token = quote(action["id_token"], safe="")
-        access_token = quote(action["access_token"], safe="")
-        script = f"""
-        <script>
-        document.cookie = "{AUTH_ID_COOKIE}={id_token}; path=/; max-age=2592000; SameSite=Lax";
-        document.cookie = "{AUTH_ACCESS_COOKIE}={access_token}; path=/; max-age=2592000; SameSite=Lax";
-        </script>
-        """
-    else:
-        script = f"""
-        <script>
-        document.cookie = "{AUTH_ID_COOKIE}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
-        document.cookie = "{AUTH_ACCESS_COOKIE}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
-        </script>
-        """
-
-    components.html(script, height=0, width=0)
-    st.session_state.auth_cookie_action = None
-
-def _restore_auth_from_cookies() -> None:
-    if st.session_state.get("auth_token"):
-        return
-
-    cookies = getattr(st.context, "cookies", {}) or {}
-    access_token = unquote(cookies.get(AUTH_ACCESS_COOKIE, "")).strip()
-    id_token = unquote(cookies.get(AUTH_ID_COOKIE, "")).strip()
-
-    if st.session_state.get("auth_cookie_restore_blocked"):
-        if not access_token and not id_token:
-            st.session_state.auth_cookie_restore_blocked = False
-        return
-
-    if not access_token or not id_token:
-        return
-
-    st.session_state.auth_token = access_token
-    st.session_state.access_token = access_token
-    st.session_state.id_token = id_token
-    st.session_state.auth_signed_in = True
 
 def bootstrap_auth_identity(id_token: str, access_token: str) -> dict:
     return post_json("/auth/bootstrap", {"id_token": id_token, "access_token": access_token})
@@ -275,10 +230,6 @@ def handle_cognito_callback() -> None:
             st.session_state.access_token,
         )
         st.session_state.auth_signed_in = True
-        _queue_auth_cookie_write(
-            id_token=st.session_state.id_token,
-            access_token=st.session_state.access_token,
-        )
         st.session_state.auth_error = None
         st.session_state.processed_auth_code = code
         clear_auth_query_params()
@@ -286,15 +237,16 @@ def handle_cognito_callback() -> None:
     except Exception as exc:
         st.session_state.auth_signed_in = False
         st.session_state.auth_token = None
+        st.session_state.access_token = None
+        st.session_state.id_token = None
         st.session_state.current_user = None
-        st.session_state.auth_error = f"Could not complete Cognito sign-in: {exc}"
+        st.session_state.auth_error = _format_auth_error(exc)
         st.session_state.processed_auth_code = code
         clear_auth_query_params()
 
 
-def sign_out() -> None:
+def sign_out() -> bool:
     # Clear auth and household-scoped UI state so the next sign-in starts cleanly.
-    _queue_auth_cookie_clear()
     st.session_state.auth_signed_in = False
     st.session_state.access_token = None
     st.session_state.auth_token = None
@@ -316,22 +268,35 @@ def sign_out() -> None:
     st.session_state.auth_error = None
     st.session_state.processed_auth_code = None
     clear_auth_query_params()
+    st.query_params["logout"] = "1"
+    return True
 
 
 def render_sign_in_screen() -> None:
+    subtitle = (
+        "Sign in with your invited beta account to continue to your documents, chat history, tasks, and cases."
+        if COGNITO_ALLOWED_GROUPS
+        else "Sign in to continue to your documents, chat history, tasks, and cases."
+    )
+    auth_eyebrow = "Private Beta" if COGNITO_ALLOWED_GROUPS else "Welcome Back"
+    auth_copy = (
+        "HomeBuddy is currently invite-only. Use the Cognito account you were invited with to get back to your saved documents, household activity, and assistant history."
+        if COGNITO_ALLOWED_GROUPS
+        else "HomeBuddy keeps your saved documents, household activity, and assistant history together so you can come back to the same workspace at any time."
+    )
     st.markdown('<p class="main-header">HomeBuddy</p>', unsafe_allow_html=True)
     st.markdown(
-        '<p class="sub-header">Sign in to continue to your documents, chat history, tasks, and cases.</p>',
+        f'<p class="sub-header">{esc(subtitle)}</p>',
         unsafe_allow_html=True,
     )
     st.markdown('<div class="hb-auth-shell"></div>', unsafe_allow_html=True)
     with st.container(key="hb-auth-parent"):
         st.markdown(
-            """
-            <div class="hb-auth-eyebrow">Welcome Back</div>
+            f"""
+            <div class="hb-auth-eyebrow">{esc(auth_eyebrow)}</div>
             <div class="hb-auth-title">Sign in and pick up where you left off.</div>
             <div class="hb-auth-copy">
-                HomeBuddy keeps your saved documents, household activity, and assistant history together so you can come back to the same workspace at any time.
+                {esc(auth_copy)}
             </div>
             """,
             unsafe_allow_html=True,
@@ -2062,10 +2027,6 @@ if "auth_error" not in st.session_state:
     st.session_state.auth_error = None
 if "processed_auth_code" not in st.session_state:
     st.session_state.processed_auth_code = None
-if "auth_cookie_action" not in st.session_state:
-    st.session_state.auth_cookie_action = None
-if "auth_cookie_restore_blocked" not in st.session_state:
-    st.session_state.auth_cookie_restore_blocked = False
 if "editing_case_id" not in st.session_state:
     st.session_state.editing_case_id = None
 if "cases_status" not in st.session_state:
@@ -2082,9 +2043,28 @@ if "pending_chat_question" not in st.session_state:
     st.session_state.pending_chat_question = None
 
 st.session_state.doc_count = len(st.session_state.indexed_docs)
-_restore_auth_from_cookies()
+if str(st.query_params.get("logout", "")).strip() == "1":
+    logout_url = build_cognito_logout_url()
+    if logout_url:
+        safe_logout_url = html.escape(logout_url, quote=True)
+        st.markdown('<p class="main-header">HomeBuddy</p>', unsafe_allow_html=True)
+        st.markdown(
+            '<p class="sub-header">Signing you out of HomeBuddy and Cognito.</p>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"""
+            <meta http-equiv="refresh" content="0;url={safe_logout_url}">
+            <script>
+            window.top.location.replace({json.dumps(logout_url)});
+            </script>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.link_button("Continue Sign Out", logout_url, use_container_width=True)
+        st.stop()
+    del st.query_params["logout"]
 handle_cognito_callback()
-_render_auth_cookie_bridge()
 
 # Resolve auth-backed user and household state before rendering the main app.
 if st.session_state.auth_signed_in:
@@ -2093,14 +2073,13 @@ if st.session_state.auth_signed_in:
         st.session_state.households = get_json("/households")
     except Exception as exc:
         # If auth resolution fails, drop back to the sign-in screen instead of rendering a broken app shell.
-        _queue_auth_cookie_clear()
         st.session_state.auth_signed_in = False
         st.session_state.auth_token = None
         st.session_state.id_token = None
         st.session_state.access_token = None
         st.session_state.current_user = None
         st.session_state.households = []
-        st.warning(f"Your session expired or could not be restored: {exc}")
+        st.session_state.auth_error = _format_session_restore_error(exc)
 
 households = st.session_state.households
 

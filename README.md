@@ -57,12 +57,18 @@ Minimum useful local values:
 - `OPENAI_API_KEY`
 - `DATABASE_URL`
 - `VECTOR_STORE_PROVIDER=pgvector`
+- `COGNITO_APP_CLIENT_ID`
+- `COGNITO_ISSUER`
+- `COGNITO_JWKS_URL`
+- `COGNITO_DOMAIN`
+- `COGNITO_REDIRECT_URI`
+- `COGNITO_LOGOUT_REDIRECT_URI`
+- `COGNITO_ALLOWED_GROUPS` if you want beta-only access enforced locally or in a deployed environment
 
 Common optional values:
 
 - `TAVILY_API_KEY`
 - `YELP_API_KEY`
-- Cognito values if `AUTH_DISABLED=false`
 - LangSmith values if you want tracing or hosted eval runs
 
 ### 2. Start Postgres with pgvector
@@ -108,7 +114,6 @@ Important environment variables used by the app:
 - `OPENAI_MODEL`
 - `TESTING_OPENAI_MODEL`
 - `VECTOR_STORE_PROVIDER`
-- `AUTH_DISABLED`
 - `COGNITO_ISSUER`
 - `COGNITO_JWKS_URL`
 - `COGNITO_APP_CLIENT_ID`
@@ -116,6 +121,7 @@ Important environment variables used by the app:
 - `COGNITO_DOMAIN`
 - `COGNITO_REDIRECT_URI`
 - `COGNITO_LOGOUT_REDIRECT_URI`
+- `COGNITO_ALLOWED_GROUPS`
 - `YELP_API_KEY`
 - `LANGSMITH_API_KEY`
 - `LANGSMITH_PROJECT`
@@ -123,6 +129,7 @@ Important environment variables used by the app:
 Notes:
 
 - The code currently reads `COGNITO_APP_CLIENT_ID`, not `COGNITO_CLIENT_ID`.
+- Set `COGNITO_ALLOWED_GROUPS` to a comma-separated list like `beta_testers,beta_admins` to require Cognito group membership before a signed-in user can enter the app.
 - The app and evals both require OpenAI credentials.
 - LangSmith behavior depends on your local env and API key configuration.
 
@@ -155,3 +162,7 @@ Optional judge-based evals:
 ```bash
 ENABLE_LLM_JUDGE_EVALS=true python tests/run_evals.py grounding
 ```
+
+## AWS deployment
+
+For the lowest-cost AWS starter path, see [docs/aws-lightsail-deploy.md](docs/aws-lightsail-deploy.md).

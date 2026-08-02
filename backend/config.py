@@ -40,16 +40,23 @@ def _int_env(name: str, default: int) -> int:
     except ValueError:
         return default
 
+
+def _csv_env(name: str) -> tuple[str, ...]:
+    value = os.getenv(name)
+    if not value:
+        return tuple()
+    return tuple(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
+
 class Settings:
     openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
-    testing_openai_model = os.getenv("OPENAI_TESTING_MODEL", "gpt-4o-mini")
+    testing_openai_model = (
+        os.getenv("OPENAI_TESTING_MODEL")
+        or os.getenv("TESTING_OPENAI_MODEL")
+        or "gpt-4o-mini"
+    )
     moderation_model = os.getenv("OPENAI_MODERATION_MODEL", "omni-moderation-latest")
     openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY", "")
     database_url = os.getenv("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/home_buddy")
-    auth_disabled = bool_env("AUTH_DISABLED", False)
-    dev_user_sub = os.getenv("DEV_USER_SUB", "local-dev-user")
-    dev_user_email = os.getenv("DEV_USER_EMAIL", "owner@example.com")
-    dev_user_name = os.getenv("DEV_USER_NAME", "Local Owner")
     cognito_region = os.getenv("COGNITO_REGION", "")
     cognito_user_pool_id = os.getenv("COGNITO_USER_POOL_ID", "")
     cognito_app_client_id = os.getenv("COGNITO_APP_CLIENT_ID", "")
@@ -59,6 +66,7 @@ class Settings:
     cognito_domain = os.getenv("COGNITO_DOMAIN", "")
     cognito_redirect_uri = os.getenv("COGNITO_REDIRECT_URI", "")
     cognito_logout_redirect_uri = os.getenv("COGNITO_LOGOUT_REDIRECT_URI", "")
+    cognito_allowed_groups = _csv_env("COGNITO_ALLOWED_GROUPS")
     vector_store_provider = os.getenv("VECTOR_STORE_PROVIDER", "pgvector")
     chroma_db_dir = os.getenv("CHROMA_DB_DIR", "chroma_db")
     embedding_dimensions = _int_env("EMBEDDING_DIMENSIONS", 1536)

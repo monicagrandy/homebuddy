@@ -1,6 +1,28 @@
+from langsmith import traceable
+
 from backend.config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _summarize_stream_events(events: list[dict] | None) -> dict:
+    if not events:
+        return {"events_emitted": 0}
+
+    final_event = next(
+        (
+            event
+            for event in reversed(events)
+            if isinstance(event, dict) and event.get("type") == "final"
+        ),
+        None,
+    )
+    final_result = final_event.get("result", {}) if isinstance(final_event, dict) else {}
+    return {
+        "events_emitted": len(events),
+        "final_route": final_result.get("route", []),
+        "input_blocked": final_result.get("input_blocked", False),
+    }
 
 class QueryService:
     def __init__(self, graph):
@@ -83,6 +105,11 @@ class QueryService:
             return event[1]
         return None
 
+    @traceable(
+        name="homebuddy.query.stream",
+        run_type="chain",
+        reduce_fn=_summarize_stream_events,
+    )
     def stream_query(
         self,
         *,
@@ -204,6 +231,7 @@ class QueryService:
 
         yield {"type": "final", "result": final_payload}
     
+    @traceable(name="homebuddy.query.sync", run_type="chain")
     def run_query(
         self,
         *,

@@ -5,7 +5,7 @@ import time
 import httpx
 from fastapi import Header, HTTPException, status
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.config import get_logger, settings
 
@@ -20,6 +20,40 @@ class AuthenticatedIdentity(BaseModel):
     subject: str
     email: str | None = None
     display_name: str | None = None
+    groups: list[str] = Field(default_factory=list)
+
+
+def _normalize_cognito_groups(raw_groups) -> list[str]:
+    if raw_groups is None:
+        return []
+    if isinstance(raw_groups, str):
+        value = raw_groups.strip()
+        return [value] if value else []
+    if isinstance(raw_groups, list):
+        return [str(group).strip() for group in raw_groups if str(group).strip()]
+    return []
+
+
+def ensure_cognito_beta_access(identity: AuthenticatedIdentity) -> None:
+    allowed_groups = settings.cognito_allowed_groups
+    if not allowed_groups:
+        return
+
+    if any(group in allowed_groups for group in identity.groups):
+        return
+
+    logger.warning(
+        "Beta access denied for cognito_sub=%s email=%s token_groups=%s allowed_groups=%s",
+        identity.subject,
+        identity.email,
+        identity.groups,
+        list(allowed_groups),
+    )
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="This account is not enabled for the HomeBuddy beta.",
+    )
     
 def _extract_bearer_token(authorization: str | None) -> str:
     if not authorization:
@@ -163,11 +197,13 @@ def validate_cognito_id_token(token: str, access_token: str | None = None) -> Au
         given = claims.get("given_name", "")
         family = claims.get("family_name", "")
         display_name = f"{given} {family}".strip() or email
+    groups = _normalize_cognito_groups(claims.get("cognito:groups"))
 
     return AuthenticatedIdentity(
         subject=subject,
         email=email,
         display_name=display_name,
+        groups=groups,
     )
 
 
@@ -220,8 +256,9 @@ def validate_cognito_access_token(token: str) -> AuthenticatedIdentity:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Access token missing subject.",
         )
+    groups = _normalize_cognito_groups(claims.get("cognito:groups"))
 
-    return AuthenticatedIdentity(subject=subject)
+    return AuthenticatedIdentity(subject=subject, groups=groups)
 
 
 def exchange_auth_code_for_tokens(code: str) -> dict:
