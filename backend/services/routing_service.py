@@ -93,6 +93,13 @@ HOME_OPS_PATTERNS = [
     r"\btask\b",
 ]
 
+GENERAL_HOME_OPS_PATTERNS = [
+    r"\bwhat can you help me with\b",
+    r"\bwhat can homebuddy do\b",
+    r"\bhow can you help\b",
+    r"\bwhat do you do\b",
+]
+
 COVERAGE_PATTERNS = [
     r"\bwarranty\b",
     r"\bcovered\b",
@@ -112,6 +119,7 @@ TROUBLESHOOTING_REGEXES = [re.compile(p, re.IGNORECASE) for p in TROUBLESHOOTING
 TROUBLESHOOTING_ENTITY_REGEXES = [re.compile(p, re.IGNORECASE) for p in TROUBLESHOOTING_ENTITY_PATTERNS]
 TROUBLESHOOTING_INFORMATION_REGEXES = [re.compile(p, re.IGNORECASE) for p in TROUBLESHOOTING_INFORMATION_PATTERNS]
 HOME_OPS_REGEXES = [re.compile(p, re.IGNORECASE) for p in HOME_OPS_PATTERNS]
+GENERAL_HOME_OPS_REGEXES = [re.compile(p, re.IGNORECASE) for p in GENERAL_HOME_OPS_PATTERNS]
 COVERAGE_REGEXES = [re.compile(p, re.IGNORECASE) for p in COVERAGE_PATTERNS]
 
 class RouteDecision(BaseModel):
@@ -125,6 +133,10 @@ class RouteDecision(BaseModel):
 class RoutingService:
     def __init__(self):
         pass
+
+    @staticmethod
+    def _matches_any(question: str, regexes: list[re.Pattern]) -> bool:
+        return any(regex.search(question) for regex in regexes)
 
     def route(self, question: str, assessment: SafetyAssessment) -> RouteDecision | None:
 
@@ -143,5 +155,47 @@ class RoutingService:
                 should_escalate=True
             )
 
+        matched_routes: list[AgentTask] = []
+
+        if self._matches_any(question, COVERAGE_REGEXES):
+            matched_routes.append(
+                AgentTask(
+                    agent="coverage_and_warranty_agent",
+                    task_description="Answer the user's coverage, warranty, or paperwork question using saved documents when possible.",
+                )
+            )
+
+        troubleshooting_match = self._matches_any(question, TROUBLESHOOTING_REGEXES) or (
+            self._matches_any(question, TROUBLESHOOTING_INFORMATION_REGEXES)
+            and self._matches_any(question, TROUBLESHOOTING_ENTITY_REGEXES)
+        )
+        if troubleshooting_match:
+            matched_routes.append(
+                AgentTask(
+                    agent="troubleshooting_agent",
+                    task_description="Help the user troubleshoot the issue using manual evidence first, then web evidence if needed.",
+                )
+            )
+
+        home_ops_match = self._matches_any(question, HOME_OPS_REGEXES) or self._matches_any(
+            question, GENERAL_HOME_OPS_REGEXES
+        )
+        if home_ops_match:
+            matched_routes.append(
+                AgentTask(
+                    agent="home_operations_agent",
+                    task_description="Handle the user's workflow, planning, app-capability, or contractor-related request.",
+                )
+            )
+
+        if matched_routes:
+            return RouteDecision(
+                route=matched_routes,
+                route_confidence=0.9 if len(matched_routes) == 1 else 0.8,
+                route_explanation="Matched deterministic routing heuristics before LLM classification.",
+                urgency_level=assessment.urgency_level or "medium",
+                should_parallelize=len(matched_routes) > 1,
+                should_escalate=assessment.should_escalate,
+            )
 
         return None

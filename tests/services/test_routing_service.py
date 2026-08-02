@@ -2,6 +2,18 @@ from backend.services.hazard_assessment_service import SafetyAssessment
 from backend.services.routing_service import RoutingService
 
 
+def _non_hazard_assessment() -> SafetyAssessment:
+    return SafetyAssessment(
+        matched=False,
+        urgency_level="low",
+        should_escalate=False,
+        stop_using=False,
+        immediate_actions=[],
+        contractor=[],
+        rationale="No hazard language detected.",
+    )
+
+
 def test_routes_safety_language_first():
     assessment = SafetyAssessment(
         matched=True,
@@ -24,3 +36,49 @@ def test_routes_safety_language_first():
     assert decision.urgency_level == "critical"
     assert decision.should_parallelize is False
 
+
+def test_routes_troubleshooting_queries_without_llm_classification():
+    decision = RoutingService().route(
+        "Why is my dishwasher not working?",
+        _non_hazard_assessment(),
+    )
+
+    assert decision is not None
+    assert [task.agent for task in decision.route] == ["troubleshooting_agent"]
+    assert decision.route_confidence == 0.9
+    assert decision.route_explanation == "Matched deterministic routing heuristics before LLM classification."
+    assert decision.should_parallelize is False
+
+
+def test_routes_coverage_queries_without_llm_classification():
+    decision = RoutingService().route(
+        "Is this repair covered by my warranty?",
+        _non_hazard_assessment(),
+    )
+
+    assert decision is not None
+    assert [task.agent for task in decision.route] == ["coverage_and_warranty_agent"]
+
+
+def test_routes_general_capability_questions_to_home_operations():
+    decision = RoutingService().route(
+        "What can you help me with as a homeowner?",
+        _non_hazard_assessment(),
+    )
+
+    assert decision is not None
+    assert [task.agent for task in decision.route] == ["home_operations_agent"]
+
+
+def test_routes_multi_domain_request_to_multiple_agents():
+    decision = RoutingService().route(
+        "My AC is not working and I need to find an HVAC contractor.",
+        _non_hazard_assessment(),
+    )
+
+    assert decision is not None
+    assert [task.agent for task in decision.route] == [
+        "troubleshooting_agent",
+        "home_operations_agent",
+    ]
+    assert decision.should_parallelize is True

@@ -64,6 +64,8 @@ Minimum useful local values:
 - `COGNITO_REDIRECT_URI`
 - `COGNITO_LOGOUT_REDIRECT_URI`
 - `COGNITO_ALLOWED_GROUPS` if you want beta-only access enforced locally or in a deployed environment
+- `PRESIDIO_SPACY_MODEL` if you want to override the default `en_core_web_sm`
+- `WARM_RUNTIME_ON_STARTUP=true` to preload heavy runtime components before the first user query
 
 Common optional values:
 

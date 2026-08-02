@@ -3,11 +3,11 @@ from typing import Literal
 from langgraph.graph import END
 from langgraph.types import Command
 
-from backend.runtime import get_safety_input_guardrail
+from backend.runtime import get_safety_guardrail
 from backend.workflow.state import HomeBuddyState
 
 def input_guardrail_node(state: HomeBuddyState) -> Command[Literal["orchestrator"]]:
-    input_guardrail = get_safety_input_guardrail()
+    input_guardrail = get_safety_guardrail()
     
     query = state["user_query"]
 

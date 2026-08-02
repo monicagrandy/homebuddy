@@ -21,7 +21,12 @@ from backend.auth import (
 )
 from backend.config import get_logger, settings
 from backend.db import Base, SessionLocal, engine, get_session
-from backend.dependencies import get_ingestion_service, get_query_service, get_vector_store
+from backend.dependencies import (
+    get_ingestion_service,
+    get_query_service,
+    get_vector_store,
+    warm_runtime_components,
+)
 from backend.guardrails.guardrails import SafetyBlockError
 from backend.ingestion.loader import DocumentLoadError
 from backend.models import (
@@ -105,6 +110,9 @@ async def lifespan(app: FastAPI):
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(engine)
     _ensure_document_schema()
+    if settings.warm_runtime_on_startup:
+        logger.info("Runtime warmup enabled; preloading critical components.")
+        warm_runtime_components()
     yield
 
 

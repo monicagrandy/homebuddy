@@ -34,11 +34,7 @@ def get_query_engine() -> AgenticQueryEngine:
     )
 
 @lru_cache
-def get_safety_input_guardrail() -> SafetyGuardrail:
-    return SafetyGuardrail()
-
-@lru_cache
-def get_safety_output_guardrail() -> SafetyGuardrail:
+def get_safety_guardrail() -> SafetyGuardrail:
     return SafetyGuardrail()
 
 

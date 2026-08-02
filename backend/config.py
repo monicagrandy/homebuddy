@@ -67,6 +67,8 @@ class Settings:
     cognito_redirect_uri = os.getenv("COGNITO_REDIRECT_URI", "")
     cognito_logout_redirect_uri = os.getenv("COGNITO_LOGOUT_REDIRECT_URI", "")
     cognito_allowed_groups = _csv_env("COGNITO_ALLOWED_GROUPS")
+    presidio_spacy_model = os.getenv("PRESIDIO_SPACY_MODEL", "en_core_web_sm")
+    warm_runtime_on_startup = bool_env("WARM_RUNTIME_ON_STARTUP", True)
     vector_store_provider = os.getenv("VECTOR_STORE_PROVIDER", "pgvector")
     chroma_db_dir = os.getenv("CHROMA_DB_DIR", "chroma_db")
     embedding_dimensions = _int_env("EMBEDDING_DIMENSIONS", 1536)

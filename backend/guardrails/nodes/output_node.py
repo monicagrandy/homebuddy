@@ -1,13 +1,13 @@
 from langgraph.graph import END
 from langgraph.types import Command
 
-from backend.runtime import get_safety_output_guardrail
+from backend.runtime import get_safety_guardrail
 from backend.workflow.state import HomeBuddyState
 
 def final_output_guardrail_node(state: HomeBuddyState):
     # Cached singleton: constructing SafetyGuardrail loads Presidio/spaCy models,
     # which is far too expensive to do per request.
-    output_guardrail = get_safety_output_guardrail()
+    output_guardrail = get_safety_guardrail()
     
     final_answer = state["final_answer"]
 

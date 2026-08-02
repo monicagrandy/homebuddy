@@ -70,6 +70,8 @@ Make sure your local `.env` has these values set:
 - `COGNITO_REDIRECT_URI`
 - `COGNITO_LOGOUT_REDIRECT_URI`
 - `COGNITO_ALLOWED_GROUPS`
+- `PRESIDIO_SPACY_MODEL`
+- `WARM_RUNTIME_ON_STARTUP`
 
 Good starter values:
 
@@ -79,6 +81,8 @@ TESTING_OPENAI_MODEL=gpt-4o-mini
 POSTGRES_DB=home_buddy
 POSTGRES_USER=homebuddy
 POSTGRES_PASSWORD=replace-this-with-a-long-random-password
+PRESIDIO_SPACY_MODEL=en_core_web_sm
+WARM_RUNTIME_ON_STARTUP=true
 LANGCHAIN_TRACING_V2=false
 ```
 
@@ -192,7 +196,7 @@ Update `.env` with those values:
 ```env
 COGNITO_REDIRECT_URI=https://homebuddy.yourdomain.com
 COGNITO_LOGOUT_REDIRECT_URI=https://homebuddy.yourdomain.com
-COGNITO_ALLOWED_GROUPS=beta_testers
+COGNITO_ALLOWED_GROUPS=beta-testers
 ```
 
 ## Step 6: Start HomeBuddy

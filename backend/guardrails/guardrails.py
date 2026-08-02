@@ -1,7 +1,9 @@
 """Safety guardrails for inputs and outputs."""
+import importlib.util
 import re
 
 from presidio_analyzer import AnalyzerEngine
+from presidio_analyzer.nlp_engine import SpacyNlpEngine
 from presidio_anonymizer import AnonymizerEngine
 from backend.config import get_logger, settings
 
@@ -23,11 +25,48 @@ class SafetyBlockError(Exception):
     """Raised when an input or output fails toxicity checks."""
     pass
 
+
+def _is_model_available(model_name: str) -> bool:
+    return bool(model_name) and importlib.util.find_spec(model_name) is not None
+
+
+def _resolve_spacy_model() -> str:
+    preferred = settings.presidio_spacy_model.strip() or "en_core_web_sm"
+    for candidate in (preferred, "en_core_web_sm", "en_core_web_md", "en_core_web_lg"):
+        if _is_model_available(candidate):
+            if candidate != preferred:
+                logger.warning(
+                    "Configured Presidio spaCy model %s is not installed; falling back to %s.",
+                    preferred,
+                    candidate,
+                )
+            return candidate
+    return preferred
+
+
+def _build_analyzer_engine() -> AnalyzerEngine:
+    model_name = _resolve_spacy_model()
+    logger.info("Initializing Presidio AnalyzerEngine with spaCy model %s", model_name)
+    nlp_engine = SpacyNlpEngine(
+        models=[{"lang_code": "en", "model_name": model_name}],
+    )
+    return AnalyzerEngine(nlp_engine=nlp_engine)
+
+
 class SafetyGuardrail:
     def __init__(self, analyzer: AnalyzerEngine = None, anonymizer: AnonymizerEngine = None):
          """Injects PII analysis engines."""
-         self.analyzer = analyzer or AnalyzerEngine()
+         self.analyzer = analyzer or _build_analyzer_engine()
          self.anonymizer = anonymizer or AnonymizerEngine()
+
+    def warm_up(self) -> None:
+        # Touch the NLP path once during startup so the first real user query
+        # doesn't pay the full model-load cost.
+        self.analyzer.analyze(
+            text="Warm up HomeBuddy with warmup@example.com",
+            language="en",
+            entities=["EMAIL_ADDRESS"],
+        )
     
     def anonymize_input(self, text: str) -> dict:
         """Detects and redacts PII like names, phone numbers, addresses, and emails.
