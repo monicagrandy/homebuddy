@@ -8,6 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage
 from langsmith.run_helpers import tracing_context
+from openai import APIConnectionError, APITimeoutError, RateLimitError
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -68,6 +69,33 @@ from backend.services.query_service import QueryService
 from rag.query_engine import QueryEngineError
 
 logger = get_logger(__name__)
+
+_TEMPORARY_LLM_OVERLOAD_MESSAGE = (
+    "HomeBuddy is temporarily busy handling AI requests. Please try again in a few seconds."
+)
+
+
+def _raise_query_http_error(exc: Exception) -> None:
+    if isinstance(exc, RateLimitError):
+        raise HTTPException(
+            status_code=503,
+            detail=_TEMPORARY_LLM_OVERLOAD_MESSAGE,
+            headers={"Retry-After": "1"},
+        ) from exc
+    if isinstance(exc, (APIConnectionError, APITimeoutError)):
+        raise HTTPException(
+            status_code=503,
+            detail="HomeBuddy could not reach the AI provider. Please try again shortly.",
+        ) from exc
+    raise exc
+
+
+def _streaming_query_error_message(exc: Exception) -> str:
+    if isinstance(exc, RateLimitError):
+        return _TEMPORARY_LLM_OVERLOAD_MESSAGE
+    if isinstance(exc, (APIConnectionError, APITimeoutError)):
+        return "HomeBuddy could not reach the AI provider. Please try again shortly."
+    return str(exc)
 
 def _ensure_document_schema():
     if not settings.database_url.startswith("sqlite"):
@@ -866,6 +894,8 @@ def query(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except QueryEngineError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
+        _raise_query_http_error(exc)
 
 
 @app.post("/query/stream")
@@ -931,32 +961,46 @@ def query_stream(
                             )
                         yield f"data: {json.dumps(jsonable_encoder(event))}\n\n"
             except ValueError as exc:
+                message = _streaming_query_error_message(exc)
                 _append_conversation_message(
                     persist_session,
                     household_id=payload.household_id,
                     session_id=payload.session_id,
                     role="assistant",
-                    content=str(exc),
+                    content=message,
                 )
-                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
             except SafetyBlockError as exc:
+                message = _streaming_query_error_message(exc)
                 _append_conversation_message(
                     persist_session,
                     household_id=payload.household_id,
                     session_id=payload.session_id,
                     role="assistant",
-                    content=str(exc),
+                    content=message,
                 )
-                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
             except QueryEngineError as exc:
+                message = _streaming_query_error_message(exc)
                 _append_conversation_message(
                     persist_session,
                     household_id=payload.household_id,
                     session_id=payload.session_id,
                     role="assistant",
-                    content=str(exc),
+                    content=message,
                 )
-                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
+            except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
+                message = _streaming_query_error_message(exc)
+                _append_conversation_message(
+                    persist_session,
+                    household_id=payload.household_id,
+                    session_id=payload.session_id,
+                    role="assistant",
+                    content=message,
+                )
+                logger.warning("Streaming query hit temporary AI provider error: %s", exc)
+                yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
             except Exception as exc:
                 _append_conversation_message(
                     persist_session,

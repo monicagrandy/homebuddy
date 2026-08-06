@@ -88,7 +88,7 @@ def test_classification_failure_returns_no_tasks_for_non_hazard_query():
 
     with patch("backend.agents.orchestrator.get_hazard_assessment_service", return_value=fake_safety_service), \
          patch("backend.agents.orchestrator.get_routing_service", return_value=fake_routing_service), \
-         patch("backend.agents.orchestrator.get_llm", return_value=fake_llm):
+         patch("backend.agents.orchestrator.get_workflow_llm", return_value=fake_llm):
         command = _merge_test_orchestrator_node(state)
 
     assert command.goto == "final_output_guardrail_node"

@@ -9,7 +9,11 @@ from langgraph.types import Command, Send
 from backend.agents.prompts import ORCHESTRATOR_PROMPT
 from backend.agents.state import build_context
 from backend.config import get_logger
-from backend.runtime import get_hazard_assessment_service, get_llm, get_routing_service
+from backend.runtime import (
+    get_hazard_assessment_service,
+    get_routing_service,
+    get_workflow_llm,
+)
 from backend.services.routing_service import RouteDecision
 from backend.workflow.state import AgentTask, ClassificationResult, HomeBuddyState
 
@@ -80,7 +84,7 @@ def _orchestrator_node(state: HomeBuddyState) -> Command[Literal["safety_risk_ag
 
     if not decision:
         # Use LLM with structured output to get a ClassificationResult object
-        classifier = get_llm().with_structured_output(ClassificationResult)
+        classifier = get_workflow_llm().with_structured_output(ClassificationResult)
         try:
             # Invoke the classifier with the orchestrator prompt
             classification = classifier.invoke([

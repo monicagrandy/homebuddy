@@ -1,7 +1,9 @@
 from collections.abc import Generator
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from openai import RateLimitError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -27,6 +29,14 @@ class StubQueryService:
     def run_query(self, **kwargs) -> dict:
         self.calls.append(kwargs)
         return self.result
+
+
+class RaisingQueryService:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def run_query(self, **_kwargs) -> dict:
+        raise self.error
 
 
 @pytest.fixture(autouse=True)
@@ -296,3 +306,30 @@ def test_query_does_not_persist_blocked_turns(client: TestClient):
 
     assert messages_response.status_code == 200
     assert messages_response.json() == []
+
+
+def test_query_returns_503_for_upstream_rate_limit(client: TestClient):
+    household = _create_household(client)
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx.Response(429, request=request)
+    error = RateLimitError(
+        "Rate limit reached for gpt-4o.",
+        response=response,
+        body={"error": {"message": "Rate limit reached for gpt-4o."}},
+    )
+    api.app.dependency_overrides[api.get_query_service] = lambda: RaisingQueryService(error)
+
+    result = client.post(
+        "/query",
+        json={
+            "question": "What can you help me with as a homeowner?",
+            "session_id": "session-rate-limit",
+            "household_id": household["id"],
+        },
+    )
+
+    assert result.status_code == 503
+    assert result.headers["retry-after"] == "1"
+    assert result.json() == {
+        "detail": "HomeBuddy is temporarily busy handling AI requests. Please try again in a few seconds."
+    }
