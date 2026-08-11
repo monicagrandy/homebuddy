@@ -61,7 +61,7 @@ def test_synthesizer_merges_multi_agent_outputs_with_llm():
             )
     )
 
-    with patch("backend.agents.synthesizer.get_llm", return_value=fake_settings):
+    with patch("backend.agents.synthesizer.get_workflow_llm", return_value=fake_settings):
         command = synthesizer_node(state)
 
     assert command.goto == "final_output_guardrail_node"

@@ -59,7 +59,9 @@ Make sure your local `.env` has these values set:
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
+- `OPENAI_WORKFLOW_MODEL`
 - `TESTING_OPENAI_MODEL`
+- `OPENAI_MAX_RETRIES`
 - `POSTGRES_DB`
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`
@@ -76,8 +78,10 @@ Make sure your local `.env` has these values set:
 Good starter values:
 
 ```env
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-4o
+OPENAI_WORKFLOW_MODEL=gpt-4o-mini
 TESTING_OPENAI_MODEL=gpt-4o-mini
+OPENAI_MAX_RETRIES=2
 POSTGRES_DB=home_buddy
 POSTGRES_USER=homebuddy
 POSTGRES_PASSWORD=replace-this-with-a-long-random-password
@@ -140,7 +144,9 @@ Edit `.env` and fill in real values, especially:
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
+- `OPENAI_WORKFLOW_MODEL`
 - `TESTING_OPENAI_MODEL`
+- `OPENAI_MAX_RETRIES`
 - `POSTGRES_DB`
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`

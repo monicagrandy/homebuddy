@@ -114,7 +114,9 @@ Important environment variables used by the app:
 - `DATABASE_URL`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
+- `OPENAI_WORKFLOW_MODEL`
 - `TESTING_OPENAI_MODEL`
+- `OPENAI_MAX_RETRIES`
 - `VECTOR_STORE_PROVIDER`
 - `COGNITO_ISSUER`
 - `COGNITO_JWKS_URL`
@@ -133,6 +135,9 @@ Notes:
 - The code currently reads `COGNITO_APP_CLIENT_ID`, not `COGNITO_CLIENT_ID`.
 - Set `COGNITO_ALLOWED_GROUPS` to a comma-separated list like `beta_testers,beta_admins` to require Cognito group membership before a signed-in user can enter the app.
 - The app and evals both require OpenAI credentials.
+- `OPENAI_MODEL` is the higher-capability model used for safety, troubleshooting, and coverage answers.
+- `OPENAI_WORKFLOW_MODEL` is the higher-throughput model used for routing fallbacks, workflow drafting, and multi-agent synthesis. It defaults to `gpt-4o-mini`.
+- `TESTING_OPENAI_MODEL` is eval-only and does not affect live user traffic.
 - LangSmith behavior depends on your local env and API key configuration.
 
 ## Tests and evals

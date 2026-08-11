@@ -13,6 +13,10 @@ from rag.vector_store import VectorStore, build_vector_store
 def get_llm() -> ChatOpenAI:
     return settings.llm
 
+@lru_cache
+def get_workflow_llm() -> ChatOpenAI:
+    return settings.workflow_llm
+
 @lru_cache 
 def get_judge_llm() -> ChatOpenAI:
     return settings.judge_llm

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from backend.agents.prompts import OPERATIONS_PROMPT
 from backend.agents.state import AgentState, build_context
 from backend.config import get_logger
-from backend.runtime import get_llm
+from backend.runtime import get_workflow_llm
 from backend.schemas import CaseDraft, ContractorSuggestion, TaskDraft
 from backend.tools.operations_tools import (
     get_contractor_suggestions,
@@ -106,7 +106,7 @@ OPERATIONS_TOOLS_BY_NAME = {t.name: t for t in OPERATIONS_TOOLS}
 
 @lru_cache
 def get_operations_subgraph():
-    operations_llm = get_llm().bind_tools(OPERATIONS_TOOLS)
+    operations_llm = get_workflow_llm().bind_tools(OPERATIONS_TOOLS)
     return build_home_operations_subgraph(operations_llm, OPERATIONS_TOOLS_BY_NAME)
 
 # Agent Node: Handles queries using the subgraph

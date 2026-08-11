@@ -7,7 +7,7 @@ from langgraph.types import Command
 
 from backend.agents.prompts import SYNTHESIZER_PROMPT
 from backend.config import get_logger
-from backend.runtime import get_llm
+from backend.runtime import get_workflow_llm
 from backend.workflow.state import HomeBuddyState
 
 logger = get_logger(__name__)
@@ -53,7 +53,7 @@ def synthesizer_node(state: HomeBuddyState) -> Command[Literal["final_output_gua
     )
 
     # Call the LLM with the synthesizer prompt and the combined agent responses
-    merged = get_llm().invoke([
+    merged = get_workflow_llm().invoke([
         SystemMessage(content=SYNTHESIZER_PROMPT),
         HumanMessage(content=f"User query: {user_query}\n\n{parts}"),
     ])

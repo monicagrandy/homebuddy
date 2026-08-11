@@ -49,6 +49,7 @@ def _csv_env(name: str) -> tuple[str, ...]:
 
 class Settings:
     openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
+    workflow_openai_model = os.getenv("OPENAI_WORKFLOW_MODEL", "gpt-4o-mini")
     testing_openai_model = (
         os.getenv("OPENAI_TESTING_MODEL")
         or os.getenv("TESTING_OPENAI_MODEL")
@@ -76,22 +77,27 @@ class Settings:
     yelp_api_url = os.getenv("YELP_API_URL", "https://api.yelp.com/ai/chat/v2")
     langsmith_tracing = bool_env("LANGCHAIN_TRACING_V2", True)
     contractor_suggestion_limit = _int_env("CONTRACTOR_SUGGESTION_LIMIT", 3)
+    openai_max_retries = _int_env("OPENAI_MAX_RETRIES", 2)
+
+    def _build_chat_model(self, *, model: str, temperature: float) -> ChatOpenAI:
+        return ChatOpenAI(
+            model=model,
+            temperature=temperature,
+            api_key=self.openai_key,
+            max_retries=self.openai_max_retries,
+        )
 
     @cached_property
     def llm(self) -> ChatOpenAI:
-        return ChatOpenAI(
-            model=self.openai_model,
-            temperature=0.3,
-            api_key=self.openai_key,
-        )
+        return self._build_chat_model(model=self.openai_model, temperature=0.3)
+
+    @cached_property
+    def workflow_llm(self) -> ChatOpenAI:
+        return self._build_chat_model(model=self.workflow_openai_model, temperature=0.3)
 
     @cached_property
     def judge_llm(self) -> ChatOpenAI:
-        return ChatOpenAI(
-            model=self.testing_openai_model,
-            temperature=0.0,
-            api_key=self.openai_key,
-        )
+        return self._build_chat_model(model=self.testing_openai_model, temperature=0.0)
 
     @cached_property
     def openai_client(self) -> OpenAI:
