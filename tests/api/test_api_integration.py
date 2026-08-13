@@ -47,7 +47,7 @@ def clear_dependency_overrides() -> Generator[None, None, None]:
 
 
 @pytest.fixture
-def client(tmp_path) -> Generator[TestClient, None, None]:
+def client(tmp_path, monkeypatch) -> Generator[TestClient, None, None]:
     db_path = tmp_path / "api_test.db"
     engine = create_engine(
         f"sqlite:///{db_path}",
@@ -55,6 +55,11 @@ def client(tmp_path) -> Generator[TestClient, None, None]:
     )
     testing_session_local = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(engine)
+
+    monkeypatch.setattr(api, "engine", engine)
+    monkeypatch.setattr(api, "SessionLocal", testing_session_local)
+    monkeypatch.setattr(api.settings, "database_url", f"sqlite:///{db_path}")
+    monkeypatch.setattr(api.settings, "warm_runtime_on_startup", False)
 
     def override_get_session():
         with testing_session_local() as session:
@@ -240,6 +245,7 @@ def test_query_persists_sanitized_messages_to_conversation_history(client: TestC
     assert service.calls == [
         {
             "user_query": "How do I clean the dishwasher filter?",
+            "user_id": 1,
             "session_id": "session-42",
             "entry_id": None,
             "household_id": household["id"],

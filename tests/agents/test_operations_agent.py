@@ -12,6 +12,7 @@ def test_operations_node_extracts_structured_outputs():
         "user_query": "My AC isn't working. Find an HVAC technician near 90032 and remind me tomorrow to follow up.",
         "task_description": "Find an HVAC technician near 90032 and draft a follow-up reminder.",
         "messages": [],
+        "user_id": 12,
         "household_id": 4,
         "session_id": "demo-session",
         "entry_id": None,
@@ -33,7 +34,8 @@ def test_operations_node_extracts_structured_outputs():
                                 "phone": "+16262170559",
                                 "url": "https://example.com/pioneers",
                                 "reason_suggested": "HVAC specialists in the area",
-                                "provider": "yelp_ai",
+                                "provider": "serpapi_yelp",
+                                "source_attribution": "Source: Yelp results via SerpApi.",
                                 "online_submission": False,
                             }
                         ],
@@ -91,6 +93,7 @@ def test_operations_node_handles_no_tool_outputs():
         "user_query": "What reminders do I have?",
         "task_description": "Answer the reminder status question.",
         "messages": [],
+        "user_id": 12,
         "household_id": 4,
         "session_id": "demo-session",
         "entry_id": None,
@@ -111,4 +114,40 @@ def test_operations_node_handles_no_tool_outputs():
     assert command.update["operations_response"][0]["response"] == "You do not have any saved reminders yet. I can draft one if you'd like."
     assert command.update["case_draft"] is None
     assert command.update["task_draft"] is None
+    assert command.update["contractor_suggestions"] == []
+
+
+def test_operations_node_surfaces_quota_note_when_lookup_is_blocked():
+    state = {
+        "user_query": "Find me a plumber near 90032.",
+        "task_description": "Find a plumber near 90032.",
+        "messages": [],
+        "user_id": 12,
+        "household_id": 4,
+        "session_id": "demo-session",
+        "entry_id": None,
+        "asset_id": None,
+        "household_zip_code": "90032",
+    }
+    fake_result = {
+        "messages": [
+            ToolMessage(
+                content=json.dumps(
+                    {
+                        "name": "get_contractor_suggestions",
+                        "error": "Contractor lookup skipped: you've reached the 10 search limit for August 2026.",
+                        "error_type": "ContractorSearchLimitExceeded",
+                    }
+                ),
+                tool_call_id="tool-1",
+            ),
+            SimpleNamespace(content="Contractor lookup was skipped."),
+        ]
+    }
+
+    with patch("backend.agents.operations.get_operations_subgraph") as mock_graph:
+        mock_graph.return_value.invoke.return_value = fake_result
+        command = _home_operations_agent_node(state)
+
+    assert "reached the 10 search limit for August 2026" in command.update["operations_response"][0]["response"]
     assert command.update["contractor_suggestions"] == []

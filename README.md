@@ -3,7 +3,7 @@
 HomeBuddy is a Streamlit + FastAPI household assistant built around a LangGraph
 workflow. It answers grounded questions from uploaded documents, routes hazardous
 queries to a safety flow, drafts follow-up cases and tasks, and can suggest local
-contractors through Yelp.
+contractors through SerpAPI's Yelp Search API.
 
 ## Current stack
 
@@ -70,7 +70,9 @@ Minimum useful local values:
 Common optional values:
 
 - `TAVILY_API_KEY`
-- `YELP_API_KEY`
+- `SERPAPI_API_KEY`
+- `CONTRACTOR_SEARCH_PROVIDER`
+- `CONTRACTOR_SEARCH_MONTHLY_LIMIT`
 - LangSmith values if you want tracing or hosted eval runs
 
 ### 2. Start Postgres with pgvector
@@ -126,7 +128,10 @@ Important environment variables used by the app:
 - `COGNITO_REDIRECT_URI`
 - `COGNITO_LOGOUT_REDIRECT_URI`
 - `COGNITO_ALLOWED_GROUPS`
-- `YELP_API_KEY`
+- `HOME_OPERATIONS_ENABLED`
+- `SERPAPI_API_KEY`
+- `CONTRACTOR_SEARCH_PROVIDER`
+- `CONTRACTOR_SEARCH_MONTHLY_LIMIT`
 - `LANGSMITH_API_KEY`
 - `LANGSMITH_PROJECT`
 
@@ -134,6 +139,9 @@ Notes:
 
 - The code currently reads `COGNITO_APP_CLIENT_ID`, not `COGNITO_CLIENT_ID`.
 - Set `COGNITO_ALLOWED_GROUPS` to a comma-separated list like `beta_testers,beta_admins` to require Cognito group membership before a signed-in user can enter the app.
+- `HOME_OPERATIONS_ENABLED=false` is the beta-safe default. When disabled, contractor lookup, case drafting, reminder/task drafting, and similar home-operations requests are politely declined and the app reminds the user that it currently supports document-related questions only.
+- Contractor lookup now uses SerpAPI's Yelp Search API and the backend enforces a per-user monthly cap via `CONTRACTOR_SEARCH_MONTHLY_LIMIT` (default `10`).
+- `CONTRACTOR_SEARCH_PROVIDER=mock` returns deterministic fake contractor results and is what pytest and the eval runner now use by default so they never spend a real SerpAPI call.
 - The app and evals both require OpenAI credentials.
 - `OPENAI_MODEL` is the higher-capability model used for safety, troubleshooting, and coverage answers.
 - `OPENAI_WORKFLOW_MODEL` is the higher-throughput model used for routing fallbacks, workflow drafting, and multi-agent synthesis. It defaults to `gpt-4o-mini`.

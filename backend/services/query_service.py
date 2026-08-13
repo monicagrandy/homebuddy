@@ -49,6 +49,7 @@ class QueryService:
         self,
         *,
         user_query: str,
+        user_id: int,
         household_id: int,
         session_id: str,
         entry_id: str | None = None,
@@ -58,6 +59,7 @@ class QueryService:
     ) -> dict:
         return {
             "user_query": user_query,
+            "user_id": user_id,
             "household_id": household_id,
             "session_id": session_id,
             "entry_id": entry_id,
@@ -114,6 +116,7 @@ class QueryService:
         self,
         *,
         user_query: str,
+        user_id: int,
         household_id: int,
         session_id: str,
         entry_id: str | None = None,
@@ -123,6 +126,7 @@ class QueryService:
     ):
         initial_state = self._build_initial_state(
             user_query=user_query,
+            user_id=user_id,
             household_id=household_id,
             session_id=session_id,
             entry_id=entry_id,
@@ -236,6 +240,7 @@ class QueryService:
         self,
         *,
         user_query: str,
+        user_id: int,
         household_id: int,
         session_id: str,
         entry_id: str | None = None,
@@ -245,6 +250,7 @@ class QueryService:
     ):
         initial_state = self._build_initial_state(
             user_query=user_query,
+            user_id=user_id,
             household_id=household_id,
             session_id=session_id,
             entry_id=entry_id,

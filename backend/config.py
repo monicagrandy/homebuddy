@@ -70,13 +70,16 @@ class Settings:
     cognito_allowed_groups = _csv_env("COGNITO_ALLOWED_GROUPS")
     presidio_spacy_model = os.getenv("PRESIDIO_SPACY_MODEL", "en_core_web_sm")
     warm_runtime_on_startup = bool_env("WARM_RUNTIME_ON_STARTUP", True)
+    home_operations_enabled = bool_env("HOME_OPERATIONS_ENABLED", False)
     vector_store_provider = os.getenv("VECTOR_STORE_PROVIDER", "pgvector")
     chroma_db_dir = os.getenv("CHROMA_DB_DIR", "chroma_db")
     embedding_dimensions = _int_env("EMBEDDING_DIMENSIONS", 1536)
-    yelp_api_key = os.getenv("YELP_API_KEY", "")
-    yelp_api_url = os.getenv("YELP_API_URL", "https://api.yelp.com/ai/chat/v2")
+    serpapi_api_key = os.getenv("SERPAPI_API_KEY", "")
+    serpapi_api_url = os.getenv("SERPAPI_API_URL", "https://serpapi.com/search")
+    contractor_search_provider = os.getenv("CONTRACTOR_SEARCH_PROVIDER", "serpapi").strip().lower()
     langsmith_tracing = bool_env("LANGCHAIN_TRACING_V2", True)
     contractor_suggestion_limit = _int_env("CONTRACTOR_SUGGESTION_LIMIT", 3)
+    contractor_search_monthly_limit = _int_env("CONTRACTOR_SEARCH_MONTHLY_LIMIT", 10)
     openai_max_retries = _int_env("OPENAI_MAX_RETRIES", 2)
 
     def _build_chat_model(self, *, model: str, temperature: float) -> ChatOpenAI:

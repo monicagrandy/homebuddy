@@ -6,6 +6,8 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
+os.environ.setdefault("CONTRACTOR_SEARCH_PROVIDER", "mock")
+
 from langchain_core.prompts import ChatPromptTemplate
 from langsmith import Client, traceable
 from langsmith.evaluation import evaluate
@@ -17,6 +19,7 @@ from backend.services.query_service import QueryService
 
 CASE_ROOT = Path(__file__).resolve().parent / "cases"
 DEFAULT_HOUSEHOLD_ID = int(os.getenv("EVAL_HOUSEHOLD_ID", "4"))
+DEFAULT_USER_ID = int(os.getenv("EVAL_USER_ID", "999"))
 DEFAULT_SESSION_ID = os.getenv("EVAL_SESSION_ID", "eval-suite")
 DEFAULT_ZIP_CODE = os.getenv("EVAL_HOUSEHOLD_ZIP", "90032")
 ROUTING_DATASET_NAME = "home-buddy-routing"
@@ -190,6 +193,7 @@ def run_case(inputs: dict[str, Any]) -> dict[str, Any]:
     query_service = _build_query_service()
     result = query_service.run_query(
         user_query=inputs["question"],
+        user_id=inputs.get("user_id", DEFAULT_USER_ID),
         household_id=inputs.get("household_id", DEFAULT_HOUSEHOLD_ID),
         session_id=inputs.get("session_id", DEFAULT_SESSION_ID),
         entry_id=inputs.get("entry_id"),

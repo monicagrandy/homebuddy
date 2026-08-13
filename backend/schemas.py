@@ -31,6 +31,7 @@ class ContractorSuggestion(BaseModel):
     url: Optional[str] = None
     reason_suggested: str
     provider: str
+    source_attribution: Optional[str] = None
     online_submission: bool = False
 
 class QueryRequest(BaseModel):

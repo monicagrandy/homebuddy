@@ -1,5 +1,6 @@
 from backend.services.hazard_assessment_service import SafetyAssessment
 from backend.services.routing_service import RoutingService
+from backend.config import settings
 
 
 def _non_hazard_assessment() -> SafetyAssessment:
@@ -68,6 +69,17 @@ def test_routes_general_capability_questions_to_home_operations():
 
     assert decision is not None
     assert [task.agent for task in decision.route] == ["home_operations_agent"]
+
+
+def test_does_not_emit_home_operations_route_when_feature_flag_disabled(monkeypatch):
+    monkeypatch.setattr(settings, "home_operations_enabled", False)
+
+    decision = RoutingService().route(
+        "Remind me tomorrow to follow up on my AC repair.",
+        _non_hazard_assessment(),
+    )
+
+    assert decision is None
 
 
 def test_routes_multi_domain_request_to_multiple_agents():

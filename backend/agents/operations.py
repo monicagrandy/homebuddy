@@ -37,6 +37,7 @@ def parse_tool_message(out):
 def build_operations_summary(
     *,
     contractor_suggestions: list[ContractorSuggestion],
+    contractor_lookup_note: str | None,
     case_draft: CaseDraft | None,
     task_draft: TaskDraft | None,
 ) -> str:
@@ -47,6 +48,8 @@ def build_operations_summary(
         lines.append(
             f"- Found {len(contractor_suggestions)} contractor suggestion(s) for {trade}."
         )
+    elif contractor_lookup_note:
+        lines.append(f"- {contractor_lookup_note}")
 
     if case_draft:
         lines.append(
@@ -74,9 +77,25 @@ def build_home_operations_subgraph(agent_llm, tools_by_name):
         results = []
         for tc in last.tool_calls:
             name, args = tc["name"], tc["args"]
-            out = tools_by_name[name].invoke(args) if name in tools_by_name else f"Unknown tool: {name}"
-            parsed_out = parse_tool_message(out)
-            payload = json.dumps({"name": name, "result": parsed_out})
+            if name == "get_contractor_suggestions" and "requesting_user_id" not in args:
+                args = {**args, "requesting_user_id": state.get("requesting_user_id")}
+            try:
+                out = (
+                    tools_by_name[name].invoke(args)
+                    if name in tools_by_name
+                    else f"Unknown tool: {name}"
+                )
+                parsed_out = parse_tool_message(out)
+                payload = json.dumps({"name": name, "result": parsed_out})
+            except Exception as exc:
+                logger.warning("Operations tool %s failed: %s", name, exc)
+                payload = json.dumps(
+                    {
+                        "name": name,
+                        "error": str(exc),
+                        "error_type": exc.__class__.__name__,
+                    }
+                )
             results.append(
                 ToolMessage(
                     content=payload,
@@ -128,13 +147,16 @@ def _home_operations_agent_node(state: WorkerInput) -> Command[Literal["synthesi
         SystemMessage(content=OPERATIONS_PROMPT),
         # Provide the task context and customer query
         HumanMessage(content=f"{context}{location_context}Task: {task_desc}\nCustomer query: {user_query}"),
-    ]})
+    ],
+        "requesting_user_id": state.get("user_id"),
+    })
 
     # Extract the task draft, case draft and contractor suggestions from the subgraph execution
     messages = result["messages"]
     task_draft = None
     case_draft = None
     contractor_suggestions = []
+    contractor_lookup_note = None
     tool_messages_seen = 0
     for m in messages:
         if not isinstance(m, ToolMessage):
@@ -143,6 +165,17 @@ def _home_operations_agent_node(state: WorkerInput) -> Command[Literal["synthesi
 
         payload = json.loads(m.content)
         tool_name = payload["name"]
+        if payload.get("error"):
+            if tool_name == "get_contractor_suggestions":
+                contractor_lookup_note = payload["error"]
+            else:
+                logger.warning(
+                    "Operations tool %s returned an error payload: %s",
+                    tool_name,
+                    payload["error"],
+                )
+            continue
+
         data = payload["result"]
         if tool_name == "draft_task":
             task_draft = TaskDraft.model_validate(data)
@@ -164,6 +197,7 @@ def _home_operations_agent_node(state: WorkerInput) -> Command[Literal["synthesi
     else:
         answer = build_operations_summary(
             contractor_suggestions=contractor_suggestions,
+            contractor_lookup_note=contractor_lookup_note,
             case_draft=case_draft,
             task_draft=task_draft,
         )

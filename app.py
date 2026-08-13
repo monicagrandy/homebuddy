@@ -27,6 +27,16 @@ COGNITO_ALLOWED_GROUPS = tuple(
 LANGCHAIN_TRACING = os.getenv("LANGCHAIN_TRACING_V2", "true")
 BETA_ACCESS_ERROR = "This account is not enabled for the HomeBuddy beta."
 
+
+def bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+HOME_OPERATIONS_ENABLED = bool_env("HOME_OPERATIONS_ENABLED", False)
+
 def esc(value) -> str:
     return html.escape(str(value or ""))
 
@@ -460,6 +470,8 @@ def save_case_draft(case_draft: dict) -> dict:
     return post_json("/cases", payload)
 
 def render_case_draft_hitl() -> None:
+    if not HOME_OPERATIONS_ENABLED:
+        return
     pending_case_draft = st.session_state.pending_case_draft
     # Keep the most recent feedback visible even after the pending draft is cleared.
     if st.session_state.case_draft_status:
@@ -561,6 +573,8 @@ def render_case_draft_hitl() -> None:
 
 
 def render_task_draft_hitl() -> None:
+    if not HOME_OPERATIONS_ENABLED:
+        return
     pending_task_draft = st.session_state.pending_task_draft
     # Keep the most recent feedback visible even after the pending draft is cleared.
     if st.session_state.task_draft_status:
@@ -705,6 +719,15 @@ def render_contractor_suggestions(contractor_suggestions: list[dict]) -> None:
         return
 
     st.markdown("### Contractor Suggestions")
+    attributions = [
+        suggestion.get("source_attribution")
+        for suggestion in contractor_suggestions
+        if suggestion.get("source_attribution")
+    ]
+    unique_attributions = list(dict.fromkeys(attributions))
+    for attribution in unique_attributions:
+        st.caption(attribution)
+
     for suggestion in contractor_suggestions:
         business_name = suggestion.get("business_name") or "Unknown business"
         trade = suggestion.get("trade") or "unknown"
@@ -2043,6 +2066,22 @@ if "pending_chat_question" not in st.session_state:
     st.session_state.pending_chat_question = None
 
 st.session_state.doc_count = len(st.session_state.indexed_docs)
+if not HOME_OPERATIONS_ENABLED:
+    st.session_state.pending_task_draft = None
+    st.session_state.edit_task_draft = False
+    st.session_state.task_draft_status = None
+    st.session_state.task_draft_status_level = None
+    st.session_state.editing_task_id = None
+    st.session_state.tasks_status = None
+    st.session_state.tasks_status_level = None
+    st.session_state.pending_case_draft = None
+    st.session_state.edit_case_draft = False
+    st.session_state.case_draft_status = None
+    st.session_state.case_draft_status_level = None
+    st.session_state.editing_case_id = None
+    st.session_state.cases_status = None
+    st.session_state.cases_status_level = None
+
 if str(st.query_params.get("logout", "")).strip() == "1":
     logout_url = build_cognito_logout_url()
     if logout_url:
@@ -2121,10 +2160,19 @@ with nav_col:
         nav_options = {
             "chat": "Chat",
             "docs": "Save Docs",
-            "cases": "My Cases",
-            "tasks": "My Tasks",
             "profile": "My Profile",
         }
+        if HOME_OPERATIONS_ENABLED:
+            nav_options.update(
+                {
+                    "cases": "My Cases",
+                    "tasks": "My Tasks",
+                }
+            )
+
+        if st.session_state.active_view not in nav_options:
+            st.session_state.active_view = "chat"
+
         for view_key, label in nav_options.items():
             button_type = "primary" if st.session_state.active_view == view_key else "secondary"
             if st.button(label, key=f"nav_{view_key}", use_container_width=True, type=button_type):
@@ -2137,7 +2185,7 @@ with content_col:
             render_docs_tab()
         elif st.session_state.active_view == "chat":
             render_chat_tab()
-        elif st.session_state.active_view == "cases":
+        elif st.session_state.active_view == "cases" and HOME_OPERATIONS_ENABLED:
             if st.session_state.cases_status:
                 if st.session_state.cases_status_level == "success":
                     st.success(st.session_state.cases_status)
@@ -2146,7 +2194,7 @@ with content_col:
                 else:
                     st.info(st.session_state.cases_status)
             render_cases_tab()
-        elif st.session_state.active_view == "tasks":
+        elif st.session_state.active_view == "tasks" and HOME_OPERATIONS_ENABLED:
             if st.session_state.tasks_status:
                 if st.session_state.tasks_status_level == "success":
                     st.success(st.session_state.tasks_status)

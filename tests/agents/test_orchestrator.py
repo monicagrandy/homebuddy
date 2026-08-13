@@ -1,7 +1,12 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from backend.agents.orchestrator import _merge_duplicate_agent_tasks
+from backend.agents.orchestrator import (
+    _merge_duplicate_agent_tasks,
+    HOME_OPERATIONS_CAPABILITIES_MESSAGE,
+    HOME_OPERATIONS_DISABLED_MESSAGE,
+)
+from backend.config import settings
 from backend.services.routing_service import RouteDecision
 from backend.services.hazard_assessment_service import SafetyAssessment
 from backend.workflow.state import AgentTask
@@ -93,6 +98,99 @@ def test_classification_failure_returns_no_tasks_for_non_hazard_query():
 
     assert command.goto == "final_output_guardrail_node"
     assert command.update["final_answer"] == "I'm not sure how to answer that. I can help with home maintenance, troubleshooting, coverage, and safety questions."
+
+
+def test_home_operations_request_is_declined_when_feature_flag_disabled(monkeypatch):
+    monkeypatch.setattr(settings, "home_operations_enabled", False)
+    state = {
+        "user_query": "Find me an HVAC technician near 90032.",
+        "messages": [],
+        "household_id": 4,
+        "session_id": "demo-session",
+        "asset_id": None,
+        "entry_id": None,
+        "household_zip_code": "90032",
+    }
+    assessment = SafetyAssessment(matched=False, urgency_level="low", should_escalate=False)
+    fake_safety_service = SimpleNamespace(assess=lambda _query: assessment)
+
+    with patch("backend.agents.orchestrator.get_hazard_assessment_service", return_value=fake_safety_service):
+        command = _merge_test_orchestrator_node(state)
+
+    assert command.goto == "final_output_guardrail_node"
+    assert command.update["final_answer"] == HOME_OPERATIONS_DISABLED_MESSAGE
+    assert command.update["tasks"] == []
+
+
+def test_mixed_request_is_declined_when_feature_flag_disabled(monkeypatch):
+    monkeypatch.setattr(settings, "home_operations_enabled", False)
+    state = {
+        "user_query": "My AC is not working. Find me an HVAC technician near 90032.",
+        "messages": [],
+        "household_id": 4,
+        "session_id": "demo-session",
+        "asset_id": None,
+        "entry_id": None,
+        "household_zip_code": "90032",
+    }
+    assessment = SafetyAssessment(matched=False, urgency_level="low", should_escalate=False)
+    fake_safety_service = SimpleNamespace(assess=lambda _query: assessment)
+
+    with patch("backend.agents.orchestrator.get_hazard_assessment_service", return_value=fake_safety_service):
+        command = _merge_test_orchestrator_node(state)
+
+    assert command.goto == "final_output_guardrail_node"
+    assert command.update["final_answer"] == HOME_OPERATIONS_DISABLED_MESSAGE
+
+
+def test_hazard_still_routes_to_safety_when_feature_flag_disabled(monkeypatch):
+    monkeypatch.setattr(settings, "home_operations_enabled", False)
+    state = {
+        "user_query": "There is smoke coming from my oven. Find me a technician.",
+        "messages": [],
+        "household_id": 4,
+        "session_id": "demo-session",
+        "asset_id": None,
+        "entry_id": None,
+        "household_zip_code": "90032",
+    }
+    assessment = SafetyAssessment(
+        matched=True,
+        urgency_level="critical",
+        should_escalate=True,
+        stop_using=True,
+        immediate_actions=["turn off power if safe"],
+        contractor=["electrician"],
+        rationale="Detected hazard.",
+    )
+    fake_safety_service = SimpleNamespace(assess=lambda _query: assessment)
+
+    with patch("backend.agents.orchestrator.get_hazard_assessment_service", return_value=fake_safety_service):
+        command = _merge_test_orchestrator_node(state)
+
+    assert len(command.update["tasks"]) == 1
+    assert command.update["tasks"][0].agent == "safety_risk_agent"
+
+
+def test_general_capability_question_gets_beta_capabilities_message_when_feature_flag_disabled(monkeypatch):
+    monkeypatch.setattr(settings, "home_operations_enabled", False)
+    state = {
+        "user_query": "What can you help me with as a homeowner?",
+        "messages": [],
+        "household_id": 4,
+        "session_id": "demo-session",
+        "asset_id": None,
+        "entry_id": None,
+        "household_zip_code": "90032",
+    }
+    assessment = SafetyAssessment(matched=False, urgency_level="low", should_escalate=False)
+    fake_safety_service = SimpleNamespace(assess=lambda _query: assessment)
+
+    with patch("backend.agents.orchestrator.get_hazard_assessment_service", return_value=fake_safety_service):
+        command = _merge_test_orchestrator_node(state)
+
+    assert command.goto == "final_output_guardrail_node"
+    assert command.update["final_answer"] == HOME_OPERATIONS_CAPABILITIES_MESSAGE
 
 
 def _merge_test_orchestrator_node(state: dict):

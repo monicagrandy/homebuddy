@@ -863,6 +863,7 @@ def query(
         ):
             result = service.run_query(
                 user_query=payload.question,
+                user_id=user.id,
                 session_id=payload.session_id,
                 entry_id=payload.entry_id,
                 household_id=payload.household_id,
@@ -934,6 +935,7 @@ def query_stream(
                 with tracing_context(tags=trace_tags, metadata=trace_metadata):
                     for event in service.stream_query(
                         user_query=payload.question,
+                        user_id=user.id,
                         session_id=payload.session_id,
                         entry_id=payload.entry_id,
                         household_id=payload.household_id,

@@ -4,6 +4,8 @@ import os
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_home_buddy.db")
 os.environ.setdefault("VECTOR_STORE_PROVIDER", "chroma")
+os.environ.setdefault("CONTRACTOR_SEARCH_PROVIDER", "mock")
+os.environ.setdefault("HOME_OPERATIONS_ENABLED", "true")
 os.environ["COGNITO_ALLOWED_GROUPS"] = ""
 os.environ["WARM_RUNTIME_ON_STARTUP"] = "false"
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
