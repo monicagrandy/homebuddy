@@ -149,47 +149,19 @@ class QueryService:
             if update:
                 if node_name == "troubleshooting_agent" and not troubleshooting_done:
                     troubleshooting_done = True
-                    latest = self._latest_agent_response(update.get("troubleshooting_response"))
                     yield {"type": "status", "message": "🛠️ Troubleshooting agent checked the docs and finished its pass."}
-                    if latest:
-                        yield {
-                            "type": "partial_answer",
-                            "agent": latest.get("agent", "troubleshooting_agent"),
-                            "content": latest.get("response", ""),
-                        }
 
                 if node_name == "coverage_and_warranty_agent" and not coverage_done:
                     coverage_done = True
-                    latest = self._latest_agent_response(update.get("coverage_response"))
                     yield {"type": "status", "message": "📄 Coverage and warranty agent finished reviewing the paperwork."}
-                    if latest:
-                        yield {
-                            "type": "partial_answer",
-                            "agent": latest.get("agent", "coverage_and_warranty_agent"),
-                            "content": latest.get("response", ""),
-                        }
 
                 if node_name == "safety_risk_agent" and not safety_done:
                     safety_done = True
-                    latest = self._latest_agent_response(update.get("safety_response"))
                     yield {"type": "status", "message": "🚨 Safety agent finished its assessment."}
-                    if latest:
-                        yield {
-                            "type": "partial_answer",
-                            "agent": latest.get("agent", "safety_risk_agent"),
-                            "content": latest.get("response", ""),
-                        }
 
                 if node_name == "home_operations_agent" and not operations_done:
                     operations_done = True
-                    latest = self._latest_agent_response(update.get("operations_response"))
                     yield {"type": "status", "message": "🗂️ Home operations agent wrapped up the workflow steps."}
-                    if latest:
-                        yield {
-                            "type": "partial_answer",
-                            "agent": latest.get("agent", "home_operations_agent"),
-                            "content": latest.get("response", ""),
-                        }
 
             state = self._extract_value_payload(event)
             if state is None:
