@@ -27,6 +27,16 @@ COGNITO_ALLOWED_GROUPS = tuple(
 LANGCHAIN_TRACING = os.getenv("LANGCHAIN_TRACING_V2", "true")
 BETA_ACCESS_ERROR = "This account is not enabled for the HomeBuddy beta."
 
+
+def bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+HOME_OPERATIONS_ENABLED = bool_env("HOME_OPERATIONS_ENABLED", False)
+
 def esc(value) -> str:
     return html.escape(str(value or ""))
 
@@ -139,6 +149,17 @@ def clear_conversation_messages(session_id: str) -> None:
     )
 
 
+def render_streaming_status(messages: list[str] | None = None) -> str:
+    lines = messages or ["Thinking..."]
+    body = "<br>".join(esc(line) for line in lines)
+    return (
+        '<div class="hb-chat-status">'
+        '<div class="hb-chat-status-title">Processing</div>'
+        f'<div class="hb-chat-status-body">{body}</div>'
+        "</div>"
+    )
+
+
 def build_conversation_pairs(messages: list[dict]) -> list[tuple[str | None, str | None]]:
     """Convert a flat user/assistant message list into turn-based display pairs."""
     pairs: list[tuple[str | None, str | None]] = []
@@ -162,6 +183,49 @@ def build_conversation_pairs(messages: list[dict]) -> list[tuple[str | None, str
         pairs.append((pending_user_message, None))
 
     return pairs
+
+
+def build_display_conversation_pairs(
+    messages: list[dict],
+    latest_turn: dict | None,
+) -> list[tuple[str | None, str | None]]:
+    """Keep the newest completed turn visible even before persisted history catches up."""
+    pairs = build_conversation_pairs(messages)
+    if not latest_turn:
+        return pairs
+
+    latest_pair = (latest_turn.get("question"), latest_turn.get("answer"))
+    if not latest_pair[0] or not latest_pair[1]:
+        return pairs
+
+    if latest_pair not in pairs:
+        pairs.append(latest_pair)
+
+    return pairs
+
+
+def merge_agent_messages(
+    persisted_messages: list[dict],
+    local_messages: list[dict],
+) -> list[dict]:
+    """Preserve the newest local turns while backend persistence catches up."""
+    if not local_messages:
+        return persisted_messages
+    if not persisted_messages:
+        return local_messages
+
+    common_prefix = 0
+    for persisted, local in zip(persisted_messages, local_messages):
+        if persisted == local:
+            common_prefix += 1
+        else:
+            break
+
+    if common_prefix == len(persisted_messages):
+        return local_messages
+    if common_prefix == len(local_messages):
+        return persisted_messages
+    return persisted_messages
 
 
 def exchange_auth_code(code: str) -> dict:
@@ -460,6 +524,8 @@ def save_case_draft(case_draft: dict) -> dict:
     return post_json("/cases", payload)
 
 def render_case_draft_hitl() -> None:
+    if not HOME_OPERATIONS_ENABLED:
+        return
     pending_case_draft = st.session_state.pending_case_draft
     # Keep the most recent feedback visible even after the pending draft is cleared.
     if st.session_state.case_draft_status:
@@ -561,6 +627,8 @@ def render_case_draft_hitl() -> None:
 
 
 def render_task_draft_hitl() -> None:
+    if not HOME_OPERATIONS_ENABLED:
+        return
     pending_task_draft = st.session_state.pending_task_draft
     # Keep the most recent feedback visible even after the pending draft is cleared.
     if st.session_state.task_draft_status:
@@ -705,6 +773,15 @@ def render_contractor_suggestions(contractor_suggestions: list[dict]) -> None:
         return
 
     st.markdown("### Contractor Suggestions")
+    attributions = [
+        suggestion.get("source_attribution")
+        for suggestion in contractor_suggestions
+        if suggestion.get("source_attribution")
+    ]
+    unique_attributions = list(dict.fromkeys(attributions))
+    for attribution in unique_attributions:
+        st.caption(attribution)
+
     for suggestion in contractor_suggestions:
         business_name = suggestion.get("business_name") or "Unknown business"
         trade = suggestion.get("trade") or "unknown"
@@ -1172,10 +1249,14 @@ def render_chat_tab() -> None:
 
     try:
         persisted_messages = load_conversation_messages(st.session_state.session_id)
-        st.session_state.agent_messages = [
+        persisted_agent_messages = [
             {"role": message["role"], "content": message["content"]}
             for message in persisted_messages
         ]
+        st.session_state.agent_messages = merge_agent_messages(
+            persisted_agent_messages,
+            st.session_state.agent_messages,
+        )
     except Exception as exc:
         st.warning(f"Could not load conversation history: {exc}")
 
@@ -1223,9 +1304,8 @@ def render_chat_tab() -> None:
             status_placeholder = st.empty()
             answer_placeholder = st.empty()
             try:
-                status_placeholder.info("Thinking...")
+                status_placeholder.markdown(render_streaming_status(), unsafe_allow_html=True)
                 progress_messages: list[str] = []
-                partial_sections: list[str] = []
                 final_result = None
                 for event in stream_query(
                     {
@@ -1237,19 +1317,11 @@ def render_chat_tab() -> None:
                 ):
                     event_type = event.get("type")
                     if event_type == "status":
-                        progress_messages.append(f"- {event['message']}")
-                        status_placeholder.info(
-                            "Processing:\n" + "\n".join(progress_messages)
+                        progress_messages.append(event["message"])
+                        status_placeholder.markdown(
+                            render_streaming_status(progress_messages),
+                            unsafe_allow_html=True,
                         )
-                    elif event_type == "partial_answer":
-                        agent = event.get("agent", "agent").replace("_", " ").title()
-                        content = (event.get("content") or "").strip()
-                        if content:
-                            # LLM output can echo user-supplied text, so escape it before HTML embedding.
-                            partial_sections.append(
-                                f'<div class="hb-partial-block"><div class="hb-partial-title">{esc(agent)}</div>{esc(content)}</div>'
-                            )
-                            answer_placeholder.markdown("\n\n".join(partial_sections), unsafe_allow_html=True)
                     elif event_type == "final":
                         final_result = event["result"]
                     elif event_type == "error":
@@ -1259,6 +1331,7 @@ def render_chat_tab() -> None:
                     raise RuntimeError("Streaming query completed without a final result.")
 
                 answer = final_result["answer"]
+                question_for_history = final_result.get("sanitized_query") or pending_question
                 st.session_state.pending_case_draft = final_result.get("case_draft")
                 st.session_state.edit_case_draft = False
                 st.session_state.case_draft_status = None
@@ -1270,7 +1343,7 @@ def render_chat_tab() -> None:
                 st.session_state.task_draft_status_level = None
                 contractor_suggestions = final_result.get("contractor_suggestions", [])
                 st.session_state.last_agent_turn = {
-                    "question": pending_question,
+                    "question": question_for_history,
                     "answer": answer,
                     "contractor_suggestions": contractor_suggestions,
                     "case_draft": final_result.get("case_draft"),
@@ -1278,18 +1351,9 @@ def render_chat_tab() -> None:
                 }
 
                 status_placeholder.empty()
-                if partial_sections:
-                    answer_placeholder.markdown(
-                        "\n\n".join(partial_sections)
-                        + '\n\n<div class="hb-partial-block"><div class="hb-partial-title">Final Response</div>'
-                        + esc(answer)
-                        + "</div>",
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    answer_placeholder.markdown(answer)
+                answer_placeholder.markdown(answer)
                 render_contractor_suggestions(contractor_suggestions)
-                st.session_state.agent_messages.append({"role": "user", "content": pending_question})
+                st.session_state.agent_messages.append({"role": "user", "content": question_for_history})
                 st.session_state.agent_messages.append({"role": "assistant", "content": answer})
                 st.session_state.pending_chat_question = None
                 st.session_state.chat_processing = False
@@ -1300,9 +1364,11 @@ def render_chat_tab() -> None:
                 status_placeholder.empty()
                 st.error(str(exc))
 
-    conversation_pairs = build_conversation_pairs(st.session_state.agent_messages)
-
     latest_turn = st.session_state.get("last_agent_turn")
+    conversation_pairs = build_display_conversation_pairs(
+        st.session_state.agent_messages,
+        latest_turn,
+    )
     for index, (user_message, assistant_message) in enumerate(reversed(conversation_pairs)):
         if user_message:
             st.markdown(
@@ -1316,14 +1382,14 @@ def render_chat_tab() -> None:
             )
         if assistant_message:
             preview = re.sub(r"\s+", " ", assistant_message).strip()[:96] or "Assistant response"
-            is_latest_persisted_turn = (
+            is_latest_turn = (
                 latest_turn
                 and user_message == latest_turn.get("question")
                 and assistant_message == latest_turn.get("answer")
             )
             with st.expander(f"🤖 {preview}", expanded=index == 0):
                 st.markdown(assistant_message)
-                if is_latest_persisted_turn:
+                if is_latest_turn:
                     render_contractor_suggestions(
                         latest_turn.get("contractor_suggestions") or []
                     )
@@ -1753,6 +1819,30 @@ st.markdown("""
         margin-bottom: 1rem;
     }
 
+    .hb-chat-status {
+        background: #fcfbfa;
+        border: 1px solid var(--hb-border);
+        border-radius: 16px;
+        padding: 0.9rem 1rem;
+        color: var(--hb-text);
+        margin-bottom: 1rem;
+    }
+
+    .hb-chat-status-title {
+        color: var(--hb-muted);
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 0.45rem;
+    }
+
+    .hb-chat-status-body {
+        color: var(--hb-muted);
+        font-size: 0.92rem;
+        line-height: 1.55;
+    }
+
     .hb-partial-block {
         background: #fcfbfa;
         border: 1px solid var(--hb-border);
@@ -2043,6 +2133,22 @@ if "pending_chat_question" not in st.session_state:
     st.session_state.pending_chat_question = None
 
 st.session_state.doc_count = len(st.session_state.indexed_docs)
+if not HOME_OPERATIONS_ENABLED:
+    st.session_state.pending_task_draft = None
+    st.session_state.edit_task_draft = False
+    st.session_state.task_draft_status = None
+    st.session_state.task_draft_status_level = None
+    st.session_state.editing_task_id = None
+    st.session_state.tasks_status = None
+    st.session_state.tasks_status_level = None
+    st.session_state.pending_case_draft = None
+    st.session_state.edit_case_draft = False
+    st.session_state.case_draft_status = None
+    st.session_state.case_draft_status_level = None
+    st.session_state.editing_case_id = None
+    st.session_state.cases_status = None
+    st.session_state.cases_status_level = None
+
 if str(st.query_params.get("logout", "")).strip() == "1":
     logout_url = build_cognito_logout_url()
     if logout_url:
@@ -2121,10 +2227,19 @@ with nav_col:
         nav_options = {
             "chat": "Chat",
             "docs": "Save Docs",
-            "cases": "My Cases",
-            "tasks": "My Tasks",
             "profile": "My Profile",
         }
+        if HOME_OPERATIONS_ENABLED:
+            nav_options.update(
+                {
+                    "cases": "My Cases",
+                    "tasks": "My Tasks",
+                }
+            )
+
+        if st.session_state.active_view not in nav_options:
+            st.session_state.active_view = "chat"
+
         for view_key, label in nav_options.items():
             button_type = "primary" if st.session_state.active_view == view_key else "secondary"
             if st.button(label, key=f"nav_{view_key}", use_container_width=True, type=button_type):
@@ -2137,7 +2252,7 @@ with content_col:
             render_docs_tab()
         elif st.session_state.active_view == "chat":
             render_chat_tab()
-        elif st.session_state.active_view == "cases":
+        elif st.session_state.active_view == "cases" and HOME_OPERATIONS_ENABLED:
             if st.session_state.cases_status:
                 if st.session_state.cases_status_level == "success":
                     st.success(st.session_state.cases_status)
@@ -2146,7 +2261,7 @@ with content_col:
                 else:
                     st.info(st.session_state.cases_status)
             render_cases_tab()
-        elif st.session_state.active_view == "tasks":
+        elif st.session_state.active_view == "tasks" and HOME_OPERATIONS_ENABLED:
             if st.session_state.tasks_status:
                 if st.session_state.tasks_status_level == "success":
                     st.success(st.session_state.tasks_status)

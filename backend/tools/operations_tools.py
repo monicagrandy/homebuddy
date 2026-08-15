@@ -13,8 +13,13 @@ from langchain_core.tools import tool
 from backend.config import get_logger, settings
 from backend.schemas import CaseDraft, ContractorSuggestion, TaskDraft
 from backend.tools.contractor_suggestions.contractor_search import (
-    parse_yelp_ai_entities_to_contractor_suggestions,
-    search_yelp_ai_cached,
+    ContractorSearchLimitExceeded,
+    contractor_search_provider_label,
+    contractor_search_uses_mock_provider,
+    enforce_user_monthly_contractor_search_limit,
+    parse_serpapi_yelp_results_to_contractor_suggestions,
+    record_user_monthly_contractor_search,
+    search_contractor_directory_cached,
 )
 
 logger = get_logger(__name__)
@@ -55,28 +60,41 @@ def draft_case(
 def get_contractor_suggestions(
         trade: str,
         zip_code: str | None = None,
+        requesting_user_id: int | None = None,
     ) -> list[ContractorSuggestion]:
          """
          Given a trade and optional zip code, search for local contractors and return formatted suggestions.
          If zip_code is omitted, fall back to the active household zip code from graph state.
          """
-         effective_zip = (zip_code).strip()
+         effective_zip = (zip_code or "").strip()
          if not effective_zip:
              logger.info("Contractor lookup skipped because no zip code was available for trade=%s", trade)
              return []
 
-         query = f"Find the best {trade} contractors or technicians in {effective_zip}"
+         if requesting_user_id is None:
+             logger.warning("Contractor lookup skipped because user context was unavailable for trade=%s", trade)
+             return []
+
          try:
-             response_payload = search_yelp_ai_cached(query=query, chat_id=None)
+             if not contractor_search_uses_mock_provider():
+                 enforce_user_monthly_contractor_search_limit(user_id=requesting_user_id)
+             response_payload = search_contractor_directory_cached(
+                trade=trade,
+                location=effective_zip,
+            )
+             if not contractor_search_uses_mock_provider():
+                 record_user_monthly_contractor_search(user_id=requesting_user_id)
              limit = settings.contractor_suggestion_limit
 
-             suggestions = parse_yelp_ai_entities_to_contractor_suggestions(
+             suggestions = parse_serpapi_yelp_results_to_contractor_suggestions(
                 response_payload,
                 trade=trade,
-                provider="yelp_ai",
+                provider=contractor_search_provider_label(),
             )
 
              return suggestions[:limit]
+         except ContractorSearchLimitExceeded:
+             raise
          except (ValueError, httpx.HTTPError) as exc:
              logger.warning("Contractor lookup failed for trade=%s zip_code=%s: %s", trade, effective_zip, exc)
              return []

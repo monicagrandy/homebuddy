@@ -37,7 +37,8 @@ class StubGraph:
                     phone="555-0100",
                     url="https://example.com/appliance-pros",
                     reason_suggested="Highly rated local appliance repair shop",
-                    provider="yelp_ai",
+                    provider="serpapi_yelp",
+                    source_attribution="Source: Yelp results via SerpApi.",
                     online_submission=True,
                 )
             ],
@@ -50,6 +51,7 @@ def test_run_query_returns_expected_backend_shape():
 
     result = service.run_query(
         user_query="How do I descale the dishwasher?",
+        user_id=17,
         session_id="session-1",
         entry_id="dishwasher-manual",
         household_id=4,
@@ -68,6 +70,7 @@ def test_run_query_returns_expected_backend_shape():
 
     assert graph.calls == [{
         "user_query": "How do I descale the dishwasher?",
+        "user_id": 17,
         "household_id": 4,
         "session_id": "session-1",
         "entry_id": "dishwasher-manual",

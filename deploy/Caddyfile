@@ -8,7 +8,7 @@
 # When you switch from ":80" to a real domain, Caddy will automatically
 # request and renew HTTPS certificates for you.
 
-:80 {
+homebuddy.chat {
     encode gzip zstd
     reverse_proxy frontend:8501
 }

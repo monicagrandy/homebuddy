@@ -118,6 +118,7 @@ class HomeBuddyState(TypedDict):
 
 
     session_id: str
+    user_id: int
     household_id: int
     entry_id: str | None
     asset_id: int | None
@@ -148,6 +149,7 @@ class WorkerInput(TypedDict):
     # Specific task description for this agent to perform
     task_description: str
     safety_assessment: SafetyAssessment | None 
+    user_id: int
     household_id: int
     session_id: str
     entry_id: str | None

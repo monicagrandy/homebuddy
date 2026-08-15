@@ -14,6 +14,7 @@ class AgentState(TypedDict):
     # List of messages representing the conversation history within the subgraph
     # operator.add means each node's returned messages are appended, not replaced
     messages: Annotated[list[AnyMessage], operator.add]
+    requesting_user_id: int | None
 
 def build_context(messages: list[AnyMessage]) -> str:
     """Format prior conversation turns as readable text for agent context.

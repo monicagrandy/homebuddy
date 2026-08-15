@@ -2,6 +2,7 @@ import re
 
 from pydantic import BaseModel
 
+from backend.config import settings
 from backend.services.hazard_assessment_service import SafetyAssessment
 from backend.workflow.state import AgentTask
 
@@ -138,6 +139,14 @@ class RoutingService:
     def _matches_any(question: str, regexes: list[re.Pattern]) -> bool:
         return any(regex.search(question) for regex in regexes)
 
+    def is_home_operations_request(self, question: str) -> bool:
+        return self._matches_any(question, HOME_OPS_REGEXES) or self._matches_any(
+            question, GENERAL_HOME_OPS_REGEXES
+        )
+
+    def is_general_home_operations_question(self, question: str) -> bool:
+        return self._matches_any(question, GENERAL_HOME_OPS_REGEXES)
+
     def route(self, question: str, assessment: SafetyAssessment) -> RouteDecision | None:
 
         if assessment.matched:
@@ -177,10 +186,8 @@ class RoutingService:
                 )
             )
 
-        home_ops_match = self._matches_any(question, HOME_OPS_REGEXES) or self._matches_any(
-            question, GENERAL_HOME_OPS_REGEXES
-        )
-        if home_ops_match:
+        home_ops_match = self.is_home_operations_request(question)
+        if home_ops_match and settings.home_operations_enabled:
             matched_routes.append(
                 AgentTask(
                     agent="home_operations_agent",

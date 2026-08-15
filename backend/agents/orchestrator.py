@@ -8,7 +8,7 @@ from langgraph.types import Command, Send
 
 from backend.agents.prompts import ORCHESTRATOR_PROMPT
 from backend.agents.state import build_context
-from backend.config import get_logger
+from backend.config import get_logger, settings
 from backend.runtime import (
     get_hazard_assessment_service,
     get_routing_service,
@@ -18,6 +18,18 @@ from backend.services.routing_service import RouteDecision
 from backend.workflow.state import AgentTask, ClassificationResult, HomeBuddyState
 
 logger = get_logger(__name__)
+
+HOME_OPERATIONS_DISABLED_MESSAGE = (
+    "I'm sorry, but I can't help with finding technicians, creating cases, or drafting tasks in this beta. "
+    "For now, I can only assist with document-related questions, such as troubleshooting, manuals, warranty, "
+    "and coverage details from your saved documents."
+)
+
+HOME_OPERATIONS_CAPABILITIES_MESSAGE = (
+    "I can help with document-related questions. "
+    "That includes troubleshooting with saved manuals, answering warranty or coverage questions from your documents, "
+    "and providing safety guidance when a household issue sounds hazardous."
+)
 
 def _confidence_for_llm_result(classification: ClassificationResult) -> float:
     if len(classification.tasks) == 1:
@@ -80,6 +92,28 @@ def _orchestrator_node(state: HomeBuddyState) -> Command[Literal["safety_risk_ag
     context = build_context(state.get("messages", []))
 
     assessment = safety_service.assess(user_query)
+    if (
+        not assessment.matched
+        and not settings.home_operations_enabled
+        and routing_service.is_home_operations_request(user_query)
+    ):
+        disabled_message = (
+            HOME_OPERATIONS_CAPABILITIES_MESSAGE
+            if routing_service.is_general_home_operations_question(user_query)
+            else HOME_OPERATIONS_DISABLED_MESSAGE
+        )
+        return Command(
+            update={
+                "sanitized_query": user_query,
+                "final_answer": disabled_message,
+                "tasks": [],
+                "route_confidence": 1.0,
+                "urgency_level": assessment.urgency_level or "low",
+                "should_escalate": False,
+            },
+            goto="final_output_guardrail_node",
+        )
+
     decision = routing_service.route(user_query, assessment)
 
     if not decision:
@@ -109,6 +143,28 @@ def _orchestrator_node(state: HomeBuddyState) -> Command[Literal["safety_risk_ag
                 route_confidence = 0,
                 should_escalate = False
             )
+
+    if (
+        not assessment.matched
+        and not settings.home_operations_enabled
+        and any(task.agent == "home_operations_agent" for task in decision.route)
+    ):
+        disabled_message = (
+            HOME_OPERATIONS_CAPABILITIES_MESSAGE
+            if routing_service.is_general_home_operations_question(user_query)
+            else HOME_OPERATIONS_DISABLED_MESSAGE
+        )
+        return Command(
+            update={
+                "sanitized_query": user_query,
+                "final_answer": disabled_message,
+                "tasks": [],
+                "route_confidence": 1.0,
+                "urgency_level": assessment.urgency_level or "low",
+                "should_escalate": False,
+            },
+            goto="final_output_guardrail_node",
+        )
     
     # Log which agents will be used and whether synthesis is needed
     logger.info("  routing=%s  synthesis=%s",
@@ -142,6 +198,7 @@ def _orchestrator_node(state: HomeBuddyState) -> Command[Literal["safety_risk_ag
                 {
                     "messages": state.get("messages", []),
                     "user_query": user_query,
+                    "user_id": state.get("user_id"),
                     "task_description": task.task_description,
                     "safety_assessment": assessment,
                     "household_id": state.get("household_id"),
