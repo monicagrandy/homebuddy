@@ -35,11 +35,11 @@ class AgentTask(BaseModel):
     
     Represents one piece of work in a potentially multi-agent request.
     For example, if a user asks 'Is my HVAC under warranty AND find me a technician' ,
-    the orchestrator creates two AgentTask objects: one for coverage_and_warranty and one for home_operations.
+    the orchestrator creates two AgentTask objects: one for document_qa and one for home_operations.
     """
 
     # Name of the agent that will handle this task
-    agent: Literal["troubleshooting_agent", "safety_risk_agent", "home_operations_agent", "coverage_and_warranty_agent"] = Field(
+    agent: Literal["document_qa_agent", "safety_risk_agent", "home_operations_agent"] = Field(
         description="Which agent handles this task"
     )
     # Description of the work the agent should perform
@@ -100,11 +100,7 @@ class HomeBuddyState(TypedDict):
 
     # Response from menu agent
     # Uses custom agent_results_reducer to allow resetting stale results
-    troubleshooting_response: Annotated[list[dict], agent_results_reducer]
-
-    # Response from order agent
-    # Uses custom agent_results_reducer to allow resetting stale results
-    coverage_response: Annotated[list[dict], agent_results_reducer]
+    document_response: Annotated[list[dict], agent_results_reducer]
 
     retrieval_context: Annotated[list[str], agent_results_reducer]
 
@@ -123,6 +119,7 @@ class HomeBuddyState(TypedDict):
     entry_id: str | None
     asset_id: int | None
     household_zip_code: str | None
+    stream_final_answer: bool
     case_draft: CaseDraft | None
     task_draft: TaskDraft | None
     contractor_suggestions: list[ContractorSuggestion] | None
@@ -155,6 +152,7 @@ class WorkerInput(TypedDict):
     entry_id: str | None
     asset_id: int | None
     household_zip_code: str | None
+    requires_synthesis: bool
     case_draft: CaseDraft | None
     task_draft: TaskDraft | None
     contractor_suggestions: list[ContractorSuggestion] | None

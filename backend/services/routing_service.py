@@ -169,7 +169,7 @@ class RoutingService:
         if self._matches_any(question, COVERAGE_REGEXES):
             matched_routes.append(
                 AgentTask(
-                    agent="coverage_and_warranty_agent",
+                    agent="document_qa_agent",
                     task_description="Answer the user's coverage, warranty, or paperwork question using saved documents when possible.",
                 )
             )
@@ -181,7 +181,7 @@ class RoutingService:
         if troubleshooting_match:
             matched_routes.append(
                 AgentTask(
-                    agent="troubleshooting_agent",
+                    agent="document_qa_agent",
                     task_description="Help the user troubleshoot the issue using manual evidence first, then web evidence if needed.",
                 )
             )

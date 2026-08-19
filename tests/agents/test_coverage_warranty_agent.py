@@ -1,10 +1,10 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from backend.agents.coverage_warranty import _coverage_and_warranty_agent_node
+from backend.agents.document_qa import _document_qa_agent_node
 
 
-def test_coverage_agent_returns_response_to_synthesizer():
+def test_document_qa_agent_returns_direct_final_for_coverage_question():
     state = {
         "user_query": "Is my water heater covered under warranty?",
         "task_description": "Check if the water heater is covered under warranty and explain the coverage details.",
@@ -25,20 +25,21 @@ def test_coverage_agent_returns_response_to_synthesizer():
 
     fake_engine = SimpleNamespace(retrieve_local_documents=lambda **_kwargs: [])
 
-    with patch("backend.agents.coverage_warranty.get_query_engine", return_value=fake_engine), \
-         patch("backend.agents.coverage_warranty.get_coverage_warranty_subgraph") as mock_graph:
+    with patch("backend.agents.document_qa.get_query_engine", return_value=fake_engine), \
+         patch("backend.agents.document_qa.get_document_qa_subgraph") as mock_graph:
         mock_graph.return_value.invoke.return_value = fake_result
-        command = _coverage_and_warranty_agent_node(state)
+        command = _document_qa_agent_node(state)
 
-    assert command.goto == "synthesizer"
-    response = command.update["coverage_response"][0]
-    assert response["agent"] == "coverage_and_warranty_agent"
+    assert command.goto == "final_output_guardrail_node"
+    response = command.update["document_response"][0]
+    assert response["agent"] == "document_qa_agent"
     assert response["response"] == "Your water heater is covered for diagnosis, repair, or replacement up to the contract limit."
-    assert response["retrieval_context"] == ["No relevant coverage or warranty passages were found."]
-    assert command.update["retrieval_context"] == ["No relevant coverage or warranty passages were found."]
+    assert command.update["final_answer"] == response["response"]
+    assert response["retrieval_context"] == ["No relevant saved-document passages were found."]
+    assert command.update["retrieval_context"] == ["No relevant saved-document passages were found."]
 
 
-def test_coverage_agent_handles_missing_evidence_response():
+def test_document_qa_agent_handles_missing_evidence_response():
     state = {
         "user_query": "Do I have proof of purchase for this dishwasher?",
         "task_description": "Check the saved documents for proof of purchase.",
@@ -59,10 +60,10 @@ def test_coverage_agent_handles_missing_evidence_response():
 
     fake_engine = SimpleNamespace(retrieve_local_documents=lambda **_kwargs: [])
 
-    with patch("backend.agents.coverage_warranty.get_query_engine", return_value=fake_engine), \
-         patch("backend.agents.coverage_warranty.get_coverage_warranty_subgraph") as mock_graph:
+    with patch("backend.agents.document_qa.get_query_engine", return_value=fake_engine), \
+         patch("backend.agents.document_qa.get_document_qa_subgraph") as mock_graph:
         mock_graph.return_value.invoke.return_value = fake_result
-        command = _coverage_and_warranty_agent_node(state)
+        command = _document_qa_agent_node(state)
 
-    assert command.goto == "synthesizer"
-    assert "I cannot find any coverage, warranty or receipts associated with this product" in command.update["coverage_response"][0]["response"]
+    assert command.goto == "final_output_guardrail_node"
+    assert "I cannot find any coverage, warranty or receipts associated with this product" in command.update["document_response"][0]["response"]

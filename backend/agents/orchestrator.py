@@ -74,7 +74,7 @@ def _merge_duplicate_agent_tasks(tasks: list[AgentTask]) -> list[AgentTask]:
     logger.info(f"merged agent tasks: {merged}")
     return merged
 
-def _orchestrator_node(state: HomeBuddyState) -> Command[Literal["safety_risk_agent", "troubleshooting_agent", "coverage_and_warranty_agent", "home_operations_agent", "final_output_guardrail_node"]]:
+def _orchestrator_node(state: HomeBuddyState) -> Command[Literal["safety_risk_agent", "document_qa_agent", "home_operations_agent", "final_output_guardrail_node"]]:
     """Classify the user query and dispatch it to the appropriate agent(s).
     Can route to multiple if synthesis is needed."""
 
@@ -177,7 +177,7 @@ def _orchestrator_node(state: HomeBuddyState) -> Command[Literal["safety_risk_ag
     # No agent to route to
     if len(merged_tasks) == 0:
         return Command(
-            update = {"final_answer": "I'm not sure how to answer that. I can help with home maintenance, troubleshooting, coverage, and safety questions."},
+            update = {"final_answer": "I'm not sure how to answer that. I can help with saved-document questions, troubleshooting, coverage, and safety questions."},
             goto = "final_output_guardrail_node"
     ) 
 
@@ -206,6 +206,7 @@ def _orchestrator_node(state: HomeBuddyState) -> Command[Literal["safety_risk_ag
                     "asset_id": state.get("asset_id"),
                     "entry_id": state.get("entry_id"),
                     "household_zip_code": state.get("household_zip_code"),
+                    "requires_synthesis": requires_synthesis,
                 },
             )
             for task in merged_tasks

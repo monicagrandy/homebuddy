@@ -16,7 +16,7 @@ def test_merge_duplicate_agent_tasks_combines_home_operations_requests():
     tasks = [
         AgentTask(agent="home_operations_agent", task_description="Find an HVAC technician near 90032."),
         AgentTask(agent="home_operations_agent", task_description="Remind the user to follow up tomorrow."),
-        AgentTask(agent="troubleshooting_agent", task_description="Assist with the AC issue."),
+        AgentTask(agent="document_qa_agent", task_description="Assist with the AC issue."),
     ]
 
     merged = _merge_duplicate_agent_tasks(tasks)
@@ -24,7 +24,7 @@ def test_merge_duplicate_agent_tasks_combines_home_operations_requests():
     assert len(merged) == 2
     assert merged[0].agent == "home_operations_agent"
     assert merged[0].task_description == "Find an HVAC technician near 90032. Remind the user to follow up tomorrow."
-    assert merged[1].agent == "troubleshooting_agent"
+    assert merged[1].agent == "document_qa_agent"
 
 
 def test_merge_duplicate_agent_tasks_deduplicates_identical_descriptions():
@@ -97,7 +97,7 @@ def test_classification_failure_returns_no_tasks_for_non_hazard_query():
         command = _merge_test_orchestrator_node(state)
 
     assert command.goto == "final_output_guardrail_node"
-    assert command.update["final_answer"] == "I'm not sure how to answer that. I can help with home maintenance, troubleshooting, coverage, and safety questions."
+    assert command.update["final_answer"] == "I'm not sure how to answer that. I can help with saved-document questions, troubleshooting, coverage, and safety questions."
 
 
 def test_home_operations_request_is_declined_when_feature_flag_disabled(monkeypatch):

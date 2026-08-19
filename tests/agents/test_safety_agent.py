@@ -30,7 +30,8 @@ def test_safety_node_happy_path():
         command = _safety_node(state)
     response = command.update["safety_response"][0]["response"]
     assert response is not None
-    assert command.goto == "synthesizer"
+    assert command.goto == "final_output_guardrail_node"
+    assert command.update["final_answer"] == fake_result["messages"][-1].content
     response = command.update["safety_response"][0]["response"]
     assert response == fake_result["messages"][-1].content
 
@@ -55,7 +56,8 @@ def test_safety_node_fallback():
 
     response = command.update["safety_response"][0]["response"]
     assert response is not None
-    assert command.goto == "synthesizer"
+    assert command.goto == "final_output_guardrail_node"
+    assert command.update["final_answer"] == response
     assert "critical safety issue" in response.lower()
     assert "stop using" in response.lower()
     assert "call 911" in response.lower()

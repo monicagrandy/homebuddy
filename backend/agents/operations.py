@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 from pydantic import BaseModel
 
+from backend.agents.agent_flow import finalize_or_synthesize
 from backend.agents.prompts import OPERATIONS_PROMPT
 from backend.agents.state import AgentState, build_context
 from backend.config import get_logger
@@ -129,7 +130,7 @@ def get_operations_subgraph():
     return build_home_operations_subgraph(operations_llm, OPERATIONS_TOOLS_BY_NAME)
 
 # Agent Node: Handles queries using the subgraph
-def _home_operations_agent_node(state: WorkerInput) -> Command[Literal["synthesizer"]]:
+def _home_operations_agent_node(state: WorkerInput) -> Command[Literal["synthesizer", "final_output_guardrail_node"]]:
     """Run the home operations agent via its model <> tools subgraph."""
     # Extract the user's query and task description from the input state
     user_query = state.get("sanitized_query") or state["user_query"]
@@ -202,17 +203,15 @@ def _home_operations_agent_node(state: WorkerInput) -> Command[Literal["synthesi
             task_draft=task_draft,
         )
 
-    # Return the result and route to synthesizer
-    return Command(
-        # Store the agent's response for synthesis
+    return finalize_or_synthesize(
+        state=state,
+        answer=answer,
         update={
             "operations_response": [{"agent": "home_operations_agent", "response": answer}],
             "task_draft": task_draft,
             "case_draft": case_draft,
             "contractor_suggestions": contractor_suggestions,
         },
-        # Always route to synthesizer next
-        goto="synthesizer"
     )
     
 home_operations_agent = _home_operations_agent_node

@@ -45,7 +45,7 @@ def test_routes_troubleshooting_queries_without_llm_classification():
     )
 
     assert decision is not None
-    assert [task.agent for task in decision.route] == ["troubleshooting_agent"]
+    assert [task.agent for task in decision.route] == ["document_qa_agent"]
     assert decision.route_confidence == 0.9
     assert decision.route_explanation == "Matched deterministic routing heuristics before LLM classification."
     assert decision.should_parallelize is False
@@ -58,7 +58,7 @@ def test_routes_coverage_queries_without_llm_classification():
     )
 
     assert decision is not None
-    assert [task.agent for task in decision.route] == ["coverage_and_warranty_agent"]
+    assert [task.agent for task in decision.route] == ["document_qa_agent"]
 
 
 def test_routes_general_capability_questions_to_home_operations():
@@ -90,7 +90,7 @@ def test_routes_multi_domain_request_to_multiple_agents():
 
     assert decision is not None
     assert [task.agent for task in decision.route] == [
-        "troubleshooting_agent",
+        "document_qa_agent",
         "home_operations_agent",
     ]
     assert decision.should_parallelize is True
