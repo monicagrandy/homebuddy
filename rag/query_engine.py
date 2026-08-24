@@ -81,7 +81,7 @@ class AgenticQueryEngine:
         household_id: int,
         query: str,
         session_id: str,
-        doc_type: str,
+        doc_type: str | None,
         entry_id: str = None,
         where: dict | None = None,
         n_results: int = 3,

@@ -9,6 +9,13 @@ from backend.config import get_logger, settings
 
 logger = get_logger(__name__)
 
+DOCUMENT_REDACTION_ENTITIES = [
+    "EMAIL_ADDRESS",
+    "CREDIT_CARD",
+    "US_BANK_NUMBER",
+    "US_SSN",
+]
+
 ABUSIVE_FALLBACK_PATTERNS = [
     re.compile(r"\bkill yourself\b", re.IGNORECASE),
     re.compile(r"\bgo kill yourself\b", re.IGNORECASE),
@@ -77,7 +84,7 @@ class SafetyGuardrail:
             results = self.analyzer.analyze(
                 text=text,
                 language="en",
-                entities=["EMAIL_ADDRESS", "CREDIT_CARD", "US_BANK_NUMBER", "US_SSN"],
+                entities=DOCUMENT_REDACTION_ENTITIES,
             )
             anonymized_result = self.anonymizer.anonymize(text=text, analyzer_results=results)
             return {"status": "Success", "text": anonymized_result.text}

@@ -22,13 +22,20 @@ class StubIngestionService:
 
 
 class StubQueryService:
-    def __init__(self, result: dict) -> None:
+    def __init__(self, result: dict, stream_events: list[dict] | None = None) -> None:
         self.result = result
         self.calls: list[dict] = []
+        self.stream_calls: list[dict] = []
+        self.stream_events = stream_events or []
 
     def run_query(self, **kwargs) -> dict:
         self.calls.append(kwargs)
         return self.result
+
+    def stream_query(self, **kwargs):
+        self.stream_calls.append(kwargs)
+        for event in self.stream_events:
+            yield event
 
 
 class RaisingQueryService:
@@ -222,7 +229,7 @@ def test_query_persists_sanitized_messages_to_conversation_history(client: TestC
             "answer": "Clean the dishwasher filter and run a hot cycle.",
             "sanitized_query": "How do I clean the dishwasher?",
             "input_blocked": False,
-            "route": ["troubleshooting_agent"],
+            "route": ["document_qa_agent"],
             "route_confidence": 0.91,
             "route_explanation": "Manual troubleshooting request",
             "retrieval_context": [],
@@ -339,3 +346,138 @@ def test_query_returns_503_for_upstream_rate_limit(client: TestClient):
     assert result.json() == {
         "detail": "HomeBuddy is temporarily busy handling AI requests. Please try again in a few seconds."
     }
+
+
+def test_streaming_query_emits_token_events_and_persists_final_turn(client: TestClient):
+    household = _create_household(client)
+    service = StubQueryService(
+        result={},
+        stream_events=[
+            {
+                "type": "user_accepted",
+                "sanitized_query": "How do I clean the dishwasher?",
+                "input_blocked": False,
+            },
+            {
+                "type": "status",
+                "message": "🧭 Routing complete: document_qa_agent",
+            },
+            {
+                "type": "token",
+                "text": "Clean ",
+            },
+            {
+                "type": "token",
+                "text": "the filter.",
+            },
+            {
+                "type": "final",
+                "result": {
+                    "answer": "Clean the filter.",
+                    "query": "How do I clean the dishwasher filter?",
+                    "sanitized_query": "How do I clean the dishwasher?",
+                    "input_blocked": False,
+                    "route": ["document_qa_agent"],
+                    "route_confidence": 0.91,
+                    "route_explanation": "Manual troubleshooting request",
+                    "urgency_level": None,
+                    "should_escalate": False,
+                    "case_draft": None,
+                    "task_draft": None,
+                    "contractor_suggestions": [],
+                    "retrieval_context": [],
+                },
+            },
+        ],
+    )
+    api.app.dependency_overrides[api.get_query_service] = lambda: service
+
+    response = client.post(
+        "/query/stream",
+        json={
+            "question": "How do I clean the dishwasher filter?",
+            "session_id": "session-stream-1",
+            "household_id": household["id"],
+        },
+    )
+
+    assert response.status_code == 200
+    sse_events = [
+        line[6:]
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert [api.json.loads(item) for item in sse_events] == [
+        {
+            "type": "user_accepted",
+            "sanitized_query": "How do I clean the dishwasher?",
+            "input_blocked": False,
+        },
+        {
+            "type": "status",
+            "message": "🧭 Routing complete: document_qa_agent",
+        },
+        {
+            "type": "token",
+            "text": "Clean ",
+        },
+        {
+            "type": "token",
+            "text": "the filter.",
+        },
+        {
+            "type": "final",
+            "result": {
+                "answer": "Clean the filter.",
+                "query": "How do I clean the dishwasher filter?",
+                "sanitized_query": "How do I clean the dishwasher?",
+                "input_blocked": False,
+                "route": ["document_qa_agent"],
+                "route_confidence": 0.91,
+                "route_explanation": "Manual troubleshooting request",
+                "urgency_level": None,
+                "should_escalate": False,
+                "case_draft": None,
+                "task_draft": None,
+                "contractor_suggestions": [],
+                "retrieval_context": [],
+            },
+        },
+    ]
+    assert service.stream_calls == [
+        {
+            "user_query": "How do I clean the dishwasher filter?",
+            "user_id": 1,
+            "session_id": "session-stream-1",
+            "entry_id": None,
+            "household_id": household["id"],
+            "asset_id": None,
+            "household_zip_code": None,
+            "messages": [],
+        }
+    ]
+
+    messages_response = client.get(
+        "/conversations/session-stream-1/messages",
+        params={"household_id": household["id"]},
+    )
+
+    assert messages_response.status_code == 200
+    assert messages_response.json() == [
+        {
+            "id": 1,
+            "household_id": household["id"],
+            "session_id": "session-stream-1",
+            "role": "user",
+            "content": "How do I clean the dishwasher?",
+            "created_at": messages_response.json()[0]["created_at"],
+        },
+        {
+            "id": 2,
+            "household_id": household["id"],
+            "session_id": "session-stream-1",
+            "role": "assistant",
+            "content": "Clean the filter.",
+            "created_at": messages_response.json()[1]["created_at"],
+        },
+    ]

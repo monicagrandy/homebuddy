@@ -56,6 +56,7 @@ class QueryService:
         asset_id: int | None = None,
         household_zip_code: str | None,
         messages: list | None = None,
+        stream_final_answer: bool = False,
     ) -> dict:
         return {
             "user_query": user_query,
@@ -66,6 +67,7 @@ class QueryService:
             "asset_id": asset_id,
             "household_zip_code": household_zip_code,
             "messages": messages or [],
+            "stream_final_answer": stream_final_answer,
         }
 
     @staticmethod
@@ -107,6 +109,33 @@ class QueryService:
             return event[1]
         return None
 
+    @staticmethod
+    def _extract_message_payload(event):
+        if (
+            isinstance(event, tuple)
+            and len(event) == 2
+            and event[0] == "messages"
+            and isinstance(event[1], tuple)
+            and len(event[1]) == 2
+        ):
+            return event[1]
+        return None, None
+
+    @staticmethod
+    def _coerce_message_text(message) -> str:
+        content = getattr(message, "content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict) and item.get("type") == "text":
+                    parts.append(str(item.get("text", "")))
+            return "".join(parts)
+        return str(content or "")
+
     @traceable(
         name="homebuddy.query.stream",
         run_type="chain",
@@ -133,27 +162,27 @@ class QueryService:
             asset_id=asset_id,
             household_zip_code=household_zip_code,
             messages=messages,
+            stream_final_answer=True,
         )
 
         routed = False
-        troubleshooting_done = False
-        coverage_done = False
+        document_qa_done = False
         safety_done = False
         operations_done = False
         synthesized = False
+        synthesized_streaming = False
         final_payload = None
         sanitized_query = None
 
-        for event in self.graph.stream(initial_state, stream_mode=["updates", "values"]):
+        for event in self.graph.stream(
+            initial_state,
+            stream_mode=["updates", "values", "messages"],
+        ):
             node_name, update = self._extract_update_payload(event)
             if update:
-                if node_name == "troubleshooting_agent" and not troubleshooting_done:
-                    troubleshooting_done = True
-                    yield {"type": "status", "message": "🛠️ Troubleshooting agent checked the docs and finished its pass."}
-
-                if node_name == "coverage_and_warranty_agent" and not coverage_done:
-                    coverage_done = True
-                    yield {"type": "status", "message": "📄 Coverage and warranty agent finished reviewing the paperwork."}
+                if node_name == "document_qa_agent" and not document_qa_done:
+                    document_qa_done = True
+                    yield {"type": "status", "message": "📚 Document agent checked the saved docs and finished its pass."}
 
                 if node_name == "safety_risk_agent" and not safety_done:
                     safety_done = True
@@ -162,6 +191,19 @@ class QueryService:
                 if node_name == "home_operations_agent" and not operations_done:
                     operations_done = True
                     yield {"type": "status", "message": "🗂️ Home operations agent wrapped up the workflow steps."}
+
+            message, metadata = self._extract_message_payload(event)
+            if message is not None:
+                if metadata.get("langgraph_node") != "synthesizer":
+                    continue
+                token_text = self._coerce_message_text(message)
+                if not token_text:
+                    continue
+                if not synthesized_streaming:
+                    synthesized_streaming = True
+                    yield {"type": "status", "message": "✨ Writing the final response."}
+                yield {"type": "token", "text": token_text}
+                continue
 
             state = self._extract_value_payload(event)
             if state is None:
@@ -185,7 +227,8 @@ class QueryService:
 
             if state.get("final_answer") and not synthesized:
                 synthesized = True
-                yield {"type": "status", "message": "✨ Final response is ready."}
+                if not synthesized_streaming:
+                    yield {"type": "status", "message": "✨ Final response is ready."}
                 final_payload = self._to_query_response(state)
 
         if final_payload is None:

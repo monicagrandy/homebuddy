@@ -4,6 +4,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import START, StateGraph
 from langgraph.types import Command
 
+from backend.agents.agent_flow import finalize_or_synthesize
 from backend.agents.prompts import SAFETY_PROMPT
 from backend.agents.state import AgentState, build_context
 from backend.config import get_logger
@@ -61,7 +62,7 @@ sg.add_edge(START, "model")
 # Compile the graph into an executable form
 safety_subgraph = sg.compile()
 
-def _safety_node(state: WorkerInput) -> Command[Literal["synthesizer"]]:
+def _safety_node(state: WorkerInput) -> Command[Literal["synthesizer", "final_output_guardrail_node"]]:
     """Takes a deterministic SafetyAssesment and formats it for the user without overriding any of its data."""
 
     # Try to get the user query from state, or extract it from from the last message
@@ -91,12 +92,10 @@ def _safety_node(state: WorkerInput) -> Command[Literal["synthesizer"]]:
     except Exception:
         answer = build_safety_fallback_response(assessment)
 
-    # Return the result and route to synthesizer
-    return Command(
-        # Store the agent's response for synthesis
+    return finalize_or_synthesize(
+        state=state,
+        answer=answer,
         update={"safety_response": [{"agent": "safety_agent", "response": answer}]},
-        # Always route to synthesizer next
-        goto="synthesizer"
     )
     
 safety_risk_agent = _safety_node

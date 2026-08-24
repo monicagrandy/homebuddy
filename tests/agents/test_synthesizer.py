@@ -8,8 +8,7 @@ def test_synthesizer_returns_bounded_fallback_when_no_agents_respond():
     state = {
         "user_query": "What's the best movie this weekend?",
         "messages": [],
-        "troubleshooting_response": [],
-        "coverage_response": [],
+        "document_response": [],
         "safety_response": [],
         "operations_response": [],
         "case_draft": None,
@@ -27,8 +26,7 @@ def test_synthesizer_passes_through_single_agent_response():
     state = {
         "user_query": "How do I reset my thermostat?",
         "messages": [],
-        "troubleshooting_response": [{"agent": "troubleshooting_agent", "response": "Use the reset option in settings."}],
-        "coverage_response": [],
+        "document_response": [{"agent": "document_qa_agent", "response": "Use the reset option in settings."}],
         "safety_response": [],
         "operations_response": [],
         "case_draft": None,
@@ -46,8 +44,7 @@ def test_synthesizer_merges_multi_agent_outputs_with_llm():
     state = {
         "user_query": "My AC isn't working. Find an HVAC technician near 90032.",
         "messages": [],
-        "troubleshooting_response": [{"agent": "troubleshooting_agent", "response": "Check thermostat and breaker."}],
-        "coverage_response": [],
+        "document_response": [{"agent": "document_qa_agent", "response": "Check thermostat and breaker."}],
         "safety_response": [],
         "operations_response": [{"agent": "home_operations_agent", "response": "Two HVAC contractors are available."}],
         "case_draft": None,

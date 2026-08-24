@@ -30,14 +30,17 @@ def get_pdf_loader() -> PDFDocumentLoader:
 def get_ingestion_service() -> IngestionService:
     vector_manager = get_vector_store()
     loader = get_pdf_loader()
-    pipeline = IngestionPipeline(vector_manager=vector_manager, loader=loader)
+    pipeline = IngestionPipeline(
+        vector_manager=vector_manager,
+        loader=loader,
+        safety_guardrail=get_safety_guardrail(),
+    )
     return IngestionService(vector_manager=vector_manager, pipeline=pipeline)
 
 
 def warm_runtime_components() -> None:
-    from backend.agents.coverage_warranty import get_coverage_warranty_subgraph
+    from backend.agents.document_qa import get_document_qa_subgraph
     from backend.agents.operations import get_operations_subgraph
-    from backend.agents.troubleshooting import get_troubleshooting_subgraph
 
     warm_steps = [
         ("routing service", get_routing_service),
@@ -46,8 +49,7 @@ def warm_runtime_components() -> None:
         ("vector store", get_vector_store),
         ("query engine", get_query_engine),
         ("operations subgraph", get_operations_subgraph),
-        ("troubleshooting subgraph", get_troubleshooting_subgraph),
-        ("coverage subgraph", get_coverage_warranty_subgraph),
+        ("document qa subgraph", get_document_qa_subgraph),
     ]
 
     guardrail = get_safety_guardrail()

@@ -1307,6 +1307,7 @@ def render_chat_tab() -> None:
                 status_placeholder.markdown(render_streaming_status(), unsafe_allow_html=True)
                 progress_messages: list[str] = []
                 final_result = None
+                streamed_answer = ""
                 for event in stream_query(
                     {
                         "question": pending_question,
@@ -1322,6 +1323,9 @@ def render_chat_tab() -> None:
                             render_streaming_status(progress_messages),
                             unsafe_allow_html=True,
                         )
+                    elif event_type == "token":
+                        streamed_answer += event.get("text", "")
+                        answer_placeholder.markdown(streamed_answer)
                     elif event_type == "final":
                         final_result = event["result"]
                     elif event_type == "error":

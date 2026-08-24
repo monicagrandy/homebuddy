@@ -78,8 +78,9 @@ def test_operations_node_extracts_structured_outputs():
         mock_graph.return_value.invoke.return_value = fake_result
         command = _home_operations_agent_node(state)
 
-    assert command.goto == "synthesizer"
+    assert command.goto == "final_output_guardrail_node"
     answer = command.update["operations_response"][0]["response"]
+    assert command.update["final_answer"] == answer
     assert "Found 1 contractor suggestion(s) for hvac." in answer
     assert "Case draft ready: AC Not Working (severity: high)." in answer
     assert "Task draft ready: Follow up on HVAC technician (schedule: tomorrow)." in answer
@@ -110,8 +111,9 @@ def test_operations_node_handles_no_tool_outputs():
         mock_graph.return_value.invoke.return_value = fake_result
         command = _home_operations_agent_node(state)
 
-    assert command.goto == "synthesizer"
+    assert command.goto == "final_output_guardrail_node"
     assert command.update["operations_response"][0]["response"] == "You do not have any saved reminders yet. I can draft one if you'd like."
+    assert command.update["final_answer"] == "You do not have any saved reminders yet. I can draft one if you'd like."
     assert command.update["case_draft"] is None
     assert command.update["task_draft"] is None
     assert command.update["contractor_suggestions"] == []

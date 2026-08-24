@@ -1,13 +1,13 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from backend.agents.troubleshooting import (
+from backend.agents.document_qa import (
     _build_retrieval_query,
-    _troubleshooting_agent_node,
+    _document_qa_agent_node,
 )
 
 
-def test_troubleshooting_agent_returns_response_to_synthesizer():
+def test_document_qa_agent_returns_direct_final_for_troubleshooting_question():
     state = {
         "user_query": "How do I turn on the AC with my thermostat?",
         "task_description": "Provide instructions on how to turn on the AC using the thermostat.",
@@ -28,20 +28,21 @@ def test_troubleshooting_agent_returns_response_to_synthesizer():
 
     fake_engine = SimpleNamespace(retrieve_local_documents=lambda **_kwargs: [])
 
-    with patch("backend.agents.troubleshooting.get_query_engine", return_value=fake_engine), \
-         patch("backend.agents.troubleshooting.get_troubleshooting_subgraph") as mock_graph:
+    with patch("backend.agents.document_qa.get_query_engine", return_value=fake_engine), \
+         patch("backend.agents.document_qa.get_document_qa_subgraph") as mock_graph:
         mock_graph.return_value.invoke.return_value = fake_result
-        command = _troubleshooting_agent_node(state)
+        command = _document_qa_agent_node(state)
 
-    assert command.goto == "synthesizer"
-    response = command.update["troubleshooting_response"][0]
-    assert response["agent"] == "troubleshooting_agent"
+    assert command.goto == "final_output_guardrail_node"
+    response = command.update["document_response"][0]
+    assert response["agent"] == "document_qa_agent"
     assert response["response"] == "Set the thermostat to Cool mode and lower the set point below the current room temperature."
-    assert response["retrieval_context"] == ["No relevant manual passages were found."]
-    assert command.update["retrieval_context"] == ["No relevant manual passages were found."]
+    assert command.update["final_answer"] == response["response"]
+    assert response["retrieval_context"] == ["No relevant saved-document passages were found."]
+    assert command.update["retrieval_context"] == ["No relevant saved-document passages were found."]
 
 
-def test_troubleshooting_agent_preserves_contextual_answer():
+def test_document_qa_agent_preserves_contextual_answer():
     state = {
         "user_query": "My dishwasher is not draining. What should I check first?",
         "task_description": "Assist with troubleshooting the dishwasher draining issue.",
@@ -62,13 +63,13 @@ def test_troubleshooting_agent_preserves_contextual_answer():
 
     fake_engine = SimpleNamespace(retrieve_local_documents=lambda **_kwargs: [])
 
-    with patch("backend.agents.troubleshooting.get_query_engine", return_value=fake_engine), \
-         patch("backend.agents.troubleshooting.get_troubleshooting_subgraph") as mock_graph:
+    with patch("backend.agents.document_qa.get_query_engine", return_value=fake_engine), \
+         patch("backend.agents.document_qa.get_document_qa_subgraph") as mock_graph:
         mock_graph.return_value.invoke.return_value = fake_result
-        command = _troubleshooting_agent_node(state)
+        command = _document_qa_agent_node(state)
 
-    assert command.goto == "synthesizer"
-    assert command.update["troubleshooting_response"][0]["response"] == "Check the drain filter and garbage disposal connection first."
+    assert command.goto == "final_output_guardrail_node"
+    assert command.update["document_response"][0]["response"] == "Check the drain filter and garbage disposal connection first."
 
 
 def test_build_retrieval_query_prefers_user_query_for_generic_task_descriptions():
@@ -89,4 +90,16 @@ def test_build_retrieval_query_appends_specific_focus_when_available():
     assert result == (
         "Why is my dishwasher not draining?\n"
         "Focus: Check likely causes related to the drain filter and garbage disposal connection."
+    )
+
+
+def test_build_retrieval_query_keeps_specific_focus_for_paraphrase():
+    user_query = "Help me troubleshoot my dishwasher leaking"
+    task_desc = "Help the customer troubleshoot their leaking dishwasher."
+
+    result = _build_retrieval_query(user_query, task_desc)
+
+    assert result == (
+        "Help me troubleshoot my dishwasher leaking\n"
+        "Focus: Help the customer troubleshoot their leaking dishwasher."
     )

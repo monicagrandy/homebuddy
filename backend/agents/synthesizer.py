@@ -16,14 +16,13 @@ def synthesizer_node(state: HomeBuddyState) -> Command[Literal["final_output_gua
     """Merge results from one or more agents into a single user-facing reply.
     Handles both single and multi-agent responses."""
     # Collect response lists from each agent (empty list if an agent didn't run)
-    troubleshooting_response = state.get("troubleshooting_response", [])
-    coverage_response = state.get("coverage_response", [])
+    document_response = state.get("document_response", [])
     retrieval_context = state.get("retrieval_context")
     safety_response = state.get("safety_response", [])
     operations_response = state.get("operations_response", []) 
         
     # Combine into a single flat list to handle 0, 1, or 2 agents uniformly
-    all_results = troubleshooting_response + coverage_response + safety_response + operations_response 
+    all_results = document_response + safety_response + operations_response 
      # Get the original user query for context when calling the LLM
     user_query = state.get("sanitized_query") or state["user_query"]
 
@@ -36,8 +35,10 @@ def synthesizer_node(state: HomeBuddyState) -> Command[Literal["final_output_gua
         )
         
 
+    force_synthesis = state.get("stream_final_answer", False)
+
     # If only one agent responded, pass its answer through directly without calling the LLM
-    if len(all_results) == 1:
+    if len(all_results) == 1 and not force_synthesis:
         logger.info("Synthesizer single-agent pass-through")
         return Command(
             update = {"final_answer": all_results[0]["response"]},

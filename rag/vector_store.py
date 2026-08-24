@@ -38,7 +38,7 @@ class VectorStore(ABC):
         household_id: int,
         query: str,
         session_id: str,
-        doc_type: str,
+        doc_type: str | None,
         entry_id: str | None = None,
         where: dict | None = None,
         n_results: int = 3,
@@ -122,14 +122,16 @@ class ChromaVectorStore(VectorStore):
         household_id: int,
         query: str,
         session_id: str,
-        doc_type: str,
+        doc_type: str | None,
         entry_id: str | None = None,
         where: dict | None = None,
         n_results: int = 3,
     ) -> list[dict[str, Any]]:
         collection = self.get_collection(session_id)
         query_kwargs: dict[str, Any] = {"query_texts": [query], "n_results": n_results}
-        filters: list[dict[str, Any]] = [{"household_id": household_id}, {"doc_type": doc_type}]
+        filters: list[dict[str, Any]] = [{"household_id": household_id}]
+        if doc_type is not None:
+            filters.append({"doc_type": doc_type})
         if entry_id:
             filters.append({"entry_id": entry_id})
         if where:
@@ -229,7 +231,7 @@ class PgVectorStore(VectorStore):
         household_id: int,
         query: str,
         session_id: str,
-        doc_type: str,
+        doc_type: str | None,
         entry_id: str | None = None,
         where: dict | None = None,
         n_results: int = 3,
@@ -242,8 +244,9 @@ class PgVectorStore(VectorStore):
         with self.session_factory() as session:
             stmt = select(DocumentChunk).where(
                 DocumentChunk.household_id == household_id,
-                DocumentChunk.doc_type == doc_type,
             )
+            if doc_type is not None:
+                stmt = stmt.where(DocumentChunk.doc_type == doc_type)
             if entry_id:
                 stmt = stmt.where(DocumentChunk.entry_id == entry_id)
             

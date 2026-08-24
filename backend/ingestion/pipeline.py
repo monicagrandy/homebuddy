@@ -1,4 +1,5 @@
 from backend.config import get_logger
+from backend.guardrails.guardrails import SafetyGuardrail
 from backend.ingestion.loader import DocumentLoadError, PDFDocumentLoader
 from rag.vector_store import VectorStore
 
@@ -10,13 +11,23 @@ class IngestionPipeline:
         self,
         loader: PDFDocumentLoader,
         vector_manager: VectorStore,
+        safety_guardrail: SafetyGuardrail,
         chunk_size: int = 1500,
         overlap: int = 200,
     ):
         self.loader = loader
         self.vector_manager = vector_manager
+        self.safety_guardrail = safety_guardrail
         self.chunk_size = chunk_size
         self.overlap = overlap
+
+    def sanitize_pages(self, pages: list[str]) -> list[str]:
+        sanitized_pages: list[str] = []
+        for page_text in pages:
+            sanitized_pages.append(
+                self.safety_guardrail.anonymize_input(page_text or "").get("text", page_text or "")
+            )
+        return sanitized_pages
 
     @staticmethod
     def recursive_split(
@@ -59,7 +70,7 @@ class IngestionPipeline:
         session_id: str = "default",
     ) -> dict:
         try:
-            pages = self.loader.load_pages_from_upload(file_bytes)
+            pages = self.sanitize_pages(self.loader.load_pages_from_upload(file_bytes))
             chunks = []
             for page_idx, page_text in enumerate(pages):
                 for chunk in self.recursive_split(page_text, max_size=self.chunk_size):
@@ -95,7 +106,7 @@ class IngestionPipeline:
         session_id: str = "default",  
     ) -> dict:
         try:
-            pages = self.loader.load_pages_from_url(url)
+            pages = self.sanitize_pages(self.loader.load_pages_from_url(url))
             if not pages:
                 raise DocumentLoadError("No text content could be extracted from this PDF.")
 
