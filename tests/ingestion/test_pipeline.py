@@ -32,6 +32,7 @@ class StubGuardrail:
             "status": "Success",
             "text": (
                 text.replace("123-45-6789", "[US_SSN]")
+                .replace("987654321", "[US_BANK_NUMBER]")
                 .replace("4111 1111 1111 1111", "[CREDIT_CARD]")
                 .replace("user@example.com", "[EMAIL_ADDRESS]")
             ),
@@ -84,3 +85,37 @@ def test_ingest_download_redacts_extracted_text_before_indexing():
     assert result["chunks_indexed"] == 1
     chunks = pipeline.vector_manager.calls[0]["chunks"]
     assert chunks[0]["text"] == "SSN [US_SSN] from remote PDF"
+
+
+def test_ingest_upload_redacts_high_risk_personal_identifiers_but_keeps_business_contact_details():
+    pipeline = IngestionPipeline(
+        loader=StubLoader(
+            [
+                (
+                    "Primary insured: Monica Grandy. Personal email user@example.com. "
+                    "SSN 123-45-6789. Bank account 987654321. Card 4111 1111 1111 1111. "
+                    "Call Acme Home Insurance at (800) 555-1212 or visit 200 Market Street, Los Angeles, CA."
+                )
+            ]
+        ),
+        vector_manager=StubVectorStore(),
+        safety_guardrail=StubGuardrail(),
+        chunk_size=1000,
+    )
+
+    pipeline.ingest_upload_from_file(
+        household_id=9,
+        entry_id="insurance-doc",
+        file_bytes=b"fake-pdf",
+        doc_type="warranty",
+        session_id="demo-session",
+    )
+
+    chunk_text = pipeline.vector_manager.calls[0]["chunks"][0]["text"]
+    assert "[EMAIL_ADDRESS]" in chunk_text
+    assert "[US_SSN]" in chunk_text
+    assert "[US_BANK_NUMBER]" in chunk_text
+    assert "[CREDIT_CARD]" in chunk_text
+    assert "Acme Home Insurance" in chunk_text
+    assert "(800) 555-1212" in chunk_text
+    assert "200 Market Street, Los Angeles, CA" in chunk_text
