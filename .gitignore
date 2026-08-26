@@ -19,3 +19,5 @@ docs/*
 /loadtests/users.json
 /loadtests/prompts.json
 /loadtests/reports/
+/.playwright-mcp/
+/signin.png

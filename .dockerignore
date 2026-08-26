@@ -9,7 +9,6 @@ __pycache__/
 .coverage
 .mypy_cache/
 .deepeval/
-.streamlit/
 home_buddy.db
 *.db
 *.db-shm
