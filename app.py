@@ -2597,6 +2597,24 @@ st.markdown("""
         margin-bottom: 0.35rem;
     }
 
+    /* Streamlit stretches sibling columns to the height of the document form
+       and can vertically center the shorter library column. Pin both column
+       stacks to the row start so corpus growth never moves either header. */
+    [data-testid="stHorizontalBlock"]:has(.hb-docs-intro):has(.st-key-hb_docs_form) {
+        align-items: flex-start !important;
+    }
+
+    [data-testid="stHorizontalBlock"]:has(.hb-docs-intro):has(.st-key-hb_docs_form)
+    > [data-testid="stColumn"] {
+        align-self: flex-start !important;
+        justify-content: flex-start !important;
+    }
+
+    [data-testid="stHorizontalBlock"]:has(.hb-docs-intro):has(.st-key-hb_docs_form)
+    > [data-testid="stColumn"] > [data-testid="stVerticalBlock"] {
+        justify-content: flex-start !important;
+    }
+
     .hb-doc-row {
         display: flex;
         align-items: center;
