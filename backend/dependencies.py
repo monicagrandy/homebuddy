@@ -1,8 +1,6 @@
 from functools import lru_cache
 from time import perf_counter
 
-from httpx import Client
-
 from backend.config import get_logger
 from backend.ingestion.loader import PDFDocumentLoader
 from backend.ingestion.pipeline import IngestionPipeline
@@ -24,7 +22,7 @@ def get_query_service() -> QueryService:
 
 @lru_cache
 def get_pdf_loader() -> PDFDocumentLoader:
-    return PDFDocumentLoader(http_client=Client(timeout=15.0, follow_redirects=True))
+    return PDFDocumentLoader()
 
 @lru_cache
 def get_ingestion_service() -> IngestionService:

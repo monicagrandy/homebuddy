@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <script>
+      const STORAGE_KEY = "homebuddy.auth.v1";
+
+      function post(type, payload = {}) {
+        window.parent.postMessage(
+          { isStreamlitMessage: true, type, ...payload },
+          "*"
+        );
+      }
+
+      function readStoredAuth() {
+        try {
+          const value = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null");
+          return value && typeof value === "object" ? value : {};
+        } catch (_error) {
+          window.localStorage.removeItem(STORAGE_KEY);
+          return {};
+        }
+      }
+
+      window.addEventListener("message", (event) => {
+        if (event.source !== window.parent || event.data?.type !== "streamlit:render") return;
+
+        const args = event.data.args || {};
+        const action = args.action || "read";
+
+        if (action === "write" && args.access_token) {
+          window.localStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({ access_token: args.access_token })
+          );
+        } else if (action === "clear") {
+          window.localStorage.removeItem(STORAGE_KEY);
+        }
+
+        const stored = readStoredAuth();
+        post("streamlit:setComponentValue", {
+          value: {
+            ready: true,
+            action,
+            access_token: stored.access_token || null,
+          },
+        });
+        post("streamlit:setFrameHeight", { height: 0 });
+      });
+
+      post("streamlit:componentReady", { apiVersion: 1 });
+      post("streamlit:setFrameHeight", { height: 0 });
+    </script>
+  </body>
+</html>

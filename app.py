@@ -10,6 +10,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
+from frontend_auth import claim_auth_code, jwt_is_expired
+
 load_dotenv()
 
 # ---------------------------------------------------------------------------
@@ -28,6 +30,12 @@ LANGCHAIN_TRACING = os.getenv("LANGCHAIN_TRACING_V2", "true")
 BETA_ACCESS_ERROR = "This account is not enabled for the HomeBuddy beta."
 
 
+class BackendRequestError(RuntimeError):
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def bool_env(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -36,9 +44,62 @@ def bool_env(name: str, default: bool) -> bool:
 
 
 HOME_OPERATIONS_ENABLED = bool_env("HOME_OPERATIONS_ENABLED", False)
+AUTH_STORAGE_COMPONENT = components.declare_component(
+    "homebuddy_auth_storage",
+    path=os.path.join(os.path.dirname(__file__), "frontend", "auth_storage"),
+)
+
+# Composer starter questions. Clicking one fills the input rather than sending,
+# so the wording stays editable before it goes to the agent.
+CHAT_SUGGESTIONS = (
+    "Is my dryer still under warranty?",
+    "Why is the dishwasher not draining?",
+    "When did I last change the HVAC filter?",
+)
 
 def esc(value) -> str:
     return html.escape(str(value or ""))
+
+
+# ---------------------------------------------------------------------------
+# Design-system presentation helpers
+#
+# Icons are inline Lucide paths rather than emoji so they inherit currentColor
+# and stay on the design system's 2.75 stroke weight.
+# ---------------------------------------------------------------------------
+
+_ICON_PATHS = {
+    "home": '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    "sparkle": '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/>',
+    "file": '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+    "file-min": '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
+    "shield": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
+    "check": '<path d="M20 6 9 17l-5-5"/>',
+    "chevron": '<path d="m9 18 6-6-6-6"/>',
+}
+
+
+def icon(name: str, size: int = 20, stroke: str = "currentColor", extra: str = "") -> str:
+    """Inline SVG icon from the design system's Lucide set."""
+    paths = _ICON_PATHS.get(name, "")
+    return (
+        f'<svg width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" '
+        f'stroke="{stroke}" stroke-width="2.75" stroke-linecap="round" '
+        f'stroke-linejoin="round" {extra}>{paths}</svg>'
+    )
+
+
+def initials(user: dict | None) -> str:
+    """Two-letter monogram for the account avatar, falling back to the email."""
+    user = user or {}
+    source = (user.get("display_name") or "").strip() or (user.get("email") or "").strip()
+    if not source:
+        return "HB"
+    parts = [part for part in re.split(r"[\s._-]+", source) if part]
+    if len(parts) >= 2:
+        return (parts[0][0] + parts[1][0]).upper()
+    return source[:2].upper()
+
 
 @st.cache_resource
 def get_api_client() -> httpx.Client:
@@ -79,6 +140,19 @@ def _request_headers() -> dict[str, str]:
     if token:
         return {"Authorization": f"Bearer {token}"}
     return {}
+
+
+def sync_browser_auth_storage(
+    action: str,
+    access_token: str | None = None,
+) -> dict | None:
+    """Read, write, or clear the browser-persisted Cognito access token."""
+    return AUTH_STORAGE_COMPONENT(
+        action=action,
+        access_token=access_token,
+        default=None,
+        key="homebuddy_auth_storage",
+    )
 
 def post_json(path: str, payload: dict) -> dict:
     response = get_api_client().post(path, json=payload, headers=_request_headers())
@@ -129,7 +203,7 @@ def post_form(path: str, data: dict, files: dict | None = None) -> dict:
 def get_json(path: str) -> list | dict:
     response = get_api_client().get(path, headers=_request_headers())
     if response.is_error:
-        raise RuntimeError(_read_backend_error(response))
+        raise BackendRequestError(_read_backend_error(response), response.status_code)
     return response.json()
 
 def load_current_user() -> dict:
@@ -150,14 +224,65 @@ def clear_conversation_messages(session_id: str) -> None:
 
 
 def render_streaming_status(messages: list[str] | None = None) -> str:
-    lines = messages or ["Thinking..."]
-    body = "<br>".join(esc(line) for line in lines)
+    """Agent progress card: each completed step lands as its own ticked row."""
+    lines = messages or []
+    if lines:
+        body = "".join(
+            f'<div class="hb-status-line">'
+            f'<span class="hb-status-tick">{icon("check", 12)}</span>'
+            f"<span>{esc(line)}</span>"
+            f"</div>"
+            for line in lines
+        )
+    else:
+        body = '<div class="hb-chat-status-body">Thinking…</div>'
     return (
+        '<div class="hb-msg">'
+        f'<div class="hb-msg-avatar">{icon("sparkle", 18)}</div>'
         '<div class="hb-chat-status">'
-        '<div class="hb-chat-status-title">Processing</div>'
-        f'<div class="hb-chat-status-body">{body}</div>'
+        '<div class="hb-chat-status-title">Working on it'
+        '<span class="hb-dots"><span></span><span></span><span></span></span>'
+        "</div>"
+        f"{body}"
+        "</div>"
         "</div>"
     )
+
+
+def render_user_bubble(text: str, monogram: str) -> str:
+    return (
+        '<div class="hb-msg hb-msg-user">'
+        f'<div class="hb-bubble-user">{esc(text)}</div>'
+        f'<div class="hb-msg-avatar hb-msg-avatar-user">{esc(monogram)}</div>'
+        "</div>"
+    )
+
+
+def render_safety_bubble(text: str, steps: list[str]) -> str:
+    """Urgent answers get the stop-and-do-this treatment with numbered steps."""
+    step_html = "".join(
+        f'<div class="hb-step">'
+        f'<span class="hb-step-n">{index}</span>'
+        f'<span class="hb-step-text">{esc(step)}</span>'
+        f"</div>"
+        for index, step in enumerate(steps, start=1)
+    )
+    return (
+        '<div class="hb-msg">'
+        f'<div class="hb-msg-avatar hb-msg-avatar-safety">{icon("shield", 18)}</div>'
+        '<div class="hb-bubble-safety">'
+        '<div class="hb-safety-head">Safety first — stop and do this</div>'
+        f'<div class="hb-safety-body"><p>{esc(text)}</p>{step_html}</div>'
+        "</div>"
+        "</div>"
+    )
+
+
+def is_urgent_turn(turn: dict | None) -> bool:
+    """Safety styling is driven by the backend's own hazard assessment."""
+    if not turn:
+        return False
+    return bool(turn.get("should_escalate")) or turn.get("urgency_level") in {"critical", "high"}
 
 
 def build_conversation_pairs(messages: list[dict]) -> list[tuple[str | None, str | None]]:
@@ -273,17 +398,21 @@ def handle_cognito_callback() -> None:
         description = st.query_params.get("error_description") or error
         st.session_state.auth_error = str(description)
         clear_auth_query_params()
-        return
+        st.rerun()
 
     code = st.query_params.get("code")
     if not code:
         return
 
     code = str(code)
-    if st.session_state.get("processed_auth_code") == code:
+    if not claim_auth_code(st.session_state, code):
         clear_auth_query_params()
         return
 
+    # Cognito authorization codes are single-use. Remove the callback URL and
+    # claim the code before the first network call so component/widget reruns
+    # cannot exchange it a second time.
+    clear_auth_query_params()
     try:
         token_payload = exchange_auth_code(code)
         st.session_state.auth_token = token_payload["access_token"]
@@ -294,9 +423,8 @@ def handle_cognito_callback() -> None:
             st.session_state.access_token,
         )
         st.session_state.auth_signed_in = True
+        st.session_state.auth_storage_action = "write"
         st.session_state.auth_error = None
-        st.session_state.processed_auth_code = code
-        clear_auth_query_params()
         st.rerun()
     except Exception as exc:
         st.session_state.auth_signed_in = False
@@ -305,8 +433,7 @@ def handle_cognito_callback() -> None:
         st.session_state.id_token = None
         st.session_state.current_user = None
         st.session_state.auth_error = _format_auth_error(exc)
-        st.session_state.processed_auth_code = code
-        clear_auth_query_params()
+        st.rerun()
 
 
 def sign_out() -> bool:
@@ -331,80 +458,74 @@ def sign_out() -> bool:
     st.session_state.households = []
     st.session_state.auth_error = None
     st.session_state.processed_auth_code = None
+    st.session_state.auth_storage_action = "clear"
+    st.session_state.logout_after_auth_clear = True
     clear_auth_query_params()
-    st.query_params["logout"] = "1"
     return True
 
 
 def render_sign_in_screen() -> None:
-    subtitle = (
-        "Sign in with your invited beta account to continue to your documents, chat history, tasks, and cases."
-        if COGNITO_ALLOWED_GROUPS
-        else "Sign in to continue to your documents, chat history, tasks, and cases."
-    )
     auth_eyebrow = "Private Beta" if COGNITO_ALLOWED_GROUPS else "Welcome Back"
     auth_copy = (
         "HomeBuddy is currently invite-only. Use the Cognito account you were invited with to get back to your saved documents, household activity, and assistant history."
         if COGNITO_ALLOWED_GROUPS
         else "HomeBuddy keeps your saved documents, household activity, and assistant history together so you can come back to the same workspace at any time."
     )
-    st.markdown('<p class="main-header">HomeBuddy</p>', unsafe_allow_html=True)
-    st.markdown(
-        f'<p class="sub-header">{esc(subtitle)}</p>',
-        unsafe_allow_html=True,
-    )
+
     st.markdown('<div class="hb-auth-shell"></div>', unsafe_allow_html=True)
-    with st.container(key="hb-auth-parent"):
-        st.markdown(
-            f"""
-            <div class="hb-auth-eyebrow">{esc(auth_eyebrow)}</div>
-            <div class="hb-auth-title">Sign in and pick up where you left off.</div>
-            <div class="hb-auth-copy">
-                {esc(auth_copy)}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    copy_col, hero_col = st.columns([1.05, 0.95], gap="large")
 
-        if st.session_state.get("auth_error"):
-            st.error(st.session_state.auth_error)
-
-        authorize_url = build_cognito_authorize_url()
-        if authorize_url:
+    with copy_col:
+        with st.container(key="hb_auth_copy"):
             st.markdown(
                 f"""
-                <a href="{authorize_url}" target="_self" style="
-                    display: inline-block;
-                    width: 100%;
-                    text-align: center;
-                    padding: 0.9rem 1rem;
-                    border-radius: 999px;
-                    background: #0f766e;
-                    color: white;
-                    text-decoration: none;
-                    font-weight: 700;
-                    margin: 3.5rem 0.5rem 3.5rem 0;
-                ">Sign In</a>
+                <div class="hb-brand">
+                    <div class="hb-brand-mark">{icon("home", 22)}</div>
+                    <div class="hb-brand-name" style="font-size: 1.6rem;">HomeBuddy</div>
+                </div>
+                <div class="hb-auth-eyebrow">{esc(auth_eyebrow)}</div>
+                <div class="hb-auth-title">Sign in and pick up where you left off.</div>
+                <div class="hb-auth-copy">{esc(auth_copy)}</div>
                 """,
                 unsafe_allow_html=True,
             )
-        else:
-            st.error("Cognito sign-in is not fully configured. Check domain, client id, and redirect URI.")
 
-        st.markdown(
-            """
-            <div class="hb-auth-hero">
-                <div class="hb-auth-eyebrow">Inside HomeBuddy</div>
-                <div class="hb-auth-title">Grounded answers, cleaner follow-through, less home chaos.</div>
-                <div class="hb-auth-list">
-                    • Save manuals, warranties, and receipts for grounded answers<br>
-                    • Ask for troubleshooting, safety, and coverage help<br>
-                    • Turn issues into cases, reminders, and next steps
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            if st.session_state.get("auth_error"):
+                st.error(st.session_state.auth_error)
+
+            authorize_url = build_cognito_authorize_url()
+            if authorize_url:
+                st.markdown(
+                    f'<a class="hb-signin-btn" href="{esc(authorize_url)}" target="_self">Sign In</a>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    '<div class="hb-auth-note">Invited with a different address? Ask your household owner to re-send it.</div>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.error("Cognito sign-in is not fully configured. Check domain, client id, and redirect URI.")
+
+    with hero_col:
+        with st.container(key="hb_auth_hero"):
+            features = (
+                ("file", "Save manuals, warranties, and receipts for grounded answers"),
+                ("shield", "Ask for troubleshooting, safety, and coverage help"),
+                ("check", "Turn issues into cases, reminders, and next steps"),
+            )
+            feature_html = "".join(
+                f'<div class="hb-auth-feature">{icon(name, 20, "var(--color-accent)")}'
+                f"<span>{esc(label)}</span></div>"
+                for name, label in features
+            )
+            st.markdown(
+                f"""
+                <div class="hb-auth-eyebrow" style="color: color-mix(in srgb, var(--color-text) 60%, transparent);">Inside HomeBuddy</div>
+                <div class="hb-auth-hero-title">Grounded answers, cleaner follow-through, less home chaos.</div>
+                {feature_html}
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def render_household_setup_screen() -> None:
@@ -735,9 +856,6 @@ def load_tasks() -> list[dict]:
     # Fetch persisted tasks for the active household from the existing backend endpoint.
     return get_json(f"/tasks?household_id={st.session_state.active_household_id}")
 
-def load_assets() -> list[dict]:
-    return get_json(f"/assets?household_id={st.session_state.active_household_id}")
-
 def update_case_record(case_id: int, case_payload: dict) -> dict:
     # Send edited case fields back to the backend.
     return put_json(f"/cases/{case_id}", case_payload)
@@ -745,9 +863,6 @@ def update_case_record(case_id: int, case_payload: dict) -> dict:
 def delete_case_record(case_id: int) -> None:
     # Remove a persisted case from the backend.
     delete_request(f"/cases/{case_id}")
-
-def delete_asset(asset_id: int) -> None:
-    delete_request(f"/assets/{asset_id}")
 
 def update_task_record(task_id: int, task_payload: dict) -> dict:
     # Send edited task fields back to the backend.
@@ -766,6 +881,75 @@ def delete_all_documents() -> None:
 def delete_task_record(task_id: int) -> None:
     # Remove a persisted task from the backend.
     delete_request(f"/tasks/{task_id}")
+
+
+def begin_document_index(pending_document: dict) -> None:
+    """Persist the upload across a rerun so the blocking state renders first."""
+    st.session_state.pending_document_index = pending_document
+    st.session_state.document_indexing = True
+    st.session_state.docs_status = None
+    st.session_state.docs_status_level = None
+
+
+def finish_pending_document_index() -> None:
+    pending_document = st.session_state.get("pending_document_index")
+    if not pending_document:
+        st.session_state.document_indexing = False
+        return
+
+    try:
+        data = {
+            "household_id": st.session_state.active_household_id,
+            "entry_id": pending_document["entry_id"],
+            "session_id": st.session_state.session_id,
+            "display_name": pending_document["display_name"],
+            "doc_type": pending_document.get("doc_type"),
+        }
+        files = None
+        if pending_document["source"] == "url":
+            data["url"] = pending_document["url"]
+        else:
+            files = {
+                "file": (
+                    pending_document["filename"],
+                    pending_document["content"],
+                    pending_document["content_type"],
+                )
+            }
+
+        result = post_form("/documents/index", data=data, files=files)
+        remember_indexed_doc(
+            display_name=pending_document["display_name"],
+            entry_id=pending_document["entry_id"],
+            chunks_indexed=result["chunks_indexed"],
+        )
+        st.session_state.docs_status = (
+            f"Saved {pending_document['display_name']} and indexed "
+            f"{result['chunks_indexed']} chunks."
+        )
+        st.session_state.docs_status_level = "success"
+    except Exception as exc:
+        st.session_state.docs_status = f"Could not save document: {exc}"
+        st.session_state.docs_status_level = "error"
+    finally:
+        st.session_state.pending_document_index = None
+        st.session_state.document_indexing = False
+        st.rerun()
+
+
+def render_document_indexing_overlay() -> None:
+    st.markdown(
+        f"""
+        <div class="hb-indexing-overlay" role="dialog" aria-modal="true" aria-labelledby="hb-indexing-title">
+            <div class="hb-indexing-modal">
+                <div class="hb-indexing-spinner" aria-hidden="true"></div>
+                <div id="hb-indexing-title" class="hb-indexing-title">Saving new doc</div>
+                <div class="hb-indexing-copy">Home Buddy is indexing your document so it can be used in answers.</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_contractor_suggestions(contractor_suggestions: list[dict]) -> None:
@@ -815,146 +999,53 @@ def render_profile_tab() -> None:
     st.markdown('<div class="hb-page-kicker">Profile</div>', unsafe_allow_html=True)
     st.markdown('<div class="hb-page-title">My Profile</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="hb-page-subtitle">Your account details, household summary, and the assets Home Buddy is tracking.</div>',
+        '<div class="hb-page-subtitle">Your account details and household summary.</div>',
         unsafe_allow_html=True,
     )
 
     user = st.session_state.current_user or {}
-    user_left, user_right = st.columns([2, 1])
+    user_left, user_right = st.columns([1.2, 1], gap="large")
     with user_left:
-        st.markdown("### Account")
         st.markdown(
             f"""
-            <div class="hb-card">
-                <div class="hb-card-title">{esc(user.get('display_name')) or 'HomeBuddy User'}</div>
-                <div class="hb-card-body">
-                    Email: {esc(user.get('email')) or '—'}<br>
-                    User id: {esc(user.get('id')) or '—'}
+            <div class="hb-card" style="display: flex; gap: 18px; align-items: center; box-shadow: var(--shadow-md); padding: 1.5rem;">
+                <div class="hb-avatar hb-avatar-lg">{esc(initials(user))}</div>
+                <div>
+                    <div class="hb-card-title" style="font-size: 1.4rem;">{esc(user.get('display_name')) or 'HomeBuddy User'}</div>
+                    <div class="hb-card-body">{esc(user.get('email')) or '—'}</div>
+                    <div class="hb-card-body" style="font-size: 0.78rem; opacity: 0.75;">User id {esc(user.get('id')) or '—'}</div>
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-    with user_right:
-        st.markdown("### Session")
-        if st.button("Sign Out", key="sign_out_button", use_container_width=True):
+        if st.button("Sign Out", key="sign_out_button"):
             sign_out()
             st.rerun()
 
+    with user_right:
+        household_summary = st.session_state.households[0] if st.session_state.households else {}
+        if household_summary:
+            st.markdown(
+                f"""
+                <div class="hb-card" style="background: var(--color-surface); box-shadow: var(--shadow-md); padding: 1.5rem;">
+                    <div class="hb-ground-kicker">Household</div>
+                    <div class="hb-card-title" style="font-size: 1.4rem;">{esc(household_summary.get('name'))}</div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 0.6rem;">
+                        <span class="hb-tag hb-tag-neutral">Zip {esc(household_summary.get('zip_code')) or '—'}</span>
+                        <span class="hb-tag hb-tag-accent-2">{esc(household_summary.get('role')) or 'Owner'}</span>
+                        <span class="hb-tag hb-tag-neutral">{esc(household_summary.get('home_type')) or 'Home'}</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
     if not st.session_state.households:
         st.info("No household is attached to this account yet.")
-        return
-
-    # Keep the household summary compact and easy to scan before dropping into the heavier asset-management section.
-    household = st.session_state.households[0]
-    summary_left, summary_right = st.columns([1.6, 1])
-    with summary_left:
-        st.markdown("### Household")
-        st.markdown(
-            f"""
-            <div class="hb-card">
-                <div class="hb-card-title">{esc(household['name'])}</div>
-                <div class="hb-card-body">
-                    Zip code: {esc(household.get('zip_code')) or '—'}<br>
-                    Role: {esc(household.get('role')) or 'owner'}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with summary_right:
-        st.markdown("### Active Household")
-        st.markdown(
-            f"""
-            <div class="hb-stat-card">
-                <div class="hb-stat-value">{st.session_state.active_household_id or '—'}</div>
-                <div class="hb-stat-label">Household Id</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("### Household Assets")
-    st.caption("Review each tracked appliance or home system, then add or remove assets as needed.")
-
-    try:
-        assets = load_assets()
-    except Exception as exc:
-        st.error(f"Could not load assets: {exc}")
-        assets = []
-
-    if assets:
-        st.markdown('<div class="hb-table-wrap">', unsafe_allow_html=True)
-        header_cols = st.columns([1.5, 1.2, 1.3, 1.0, 1.1, 1.2, 0.8])
-        headers = ["Name", "Brand", "Model", "Room", "Installed", "Warranty", ""]
-        for col, label in zip(header_cols, headers):
-            col.markdown(f'<div class="hb-table-head">{label}</div>', unsafe_allow_html=True)
-
-        for asset in assets:
-            row_cols = st.columns([1.5, 1.2, 1.3, 1.0, 1.1, 1.2, 0.8])
-            row_cols[0].markdown(f'<div class="hb-table-cell"><strong>{esc(asset["name"])}</strong></div>', unsafe_allow_html=True)
-            row_cols[1].markdown(f'<div class="hb-table-cell">{esc(asset.get("brand")) or "—"}</div>', unsafe_allow_html=True)
-            row_cols[2].markdown(f'<div class="hb-table-cell">{esc(asset.get("model_number")) or "—"}</div>', unsafe_allow_html=True)
-            row_cols[3].markdown(f'<div class="hb-table-cell">{esc(asset.get("room")) or "—"}</div>', unsafe_allow_html=True)
-            row_cols[4].markdown(f'<div class="hb-table-cell">{esc(asset.get("install_date")) or "—"}</div>', unsafe_allow_html=True)
-            row_cols[5].markdown(f'<div class="hb-table-cell">{esc(asset.get("warranty_end_date")) or "—"}</div>', unsafe_allow_html=True)
-            if row_cols[6].button("Delete", key=f"delete_asset_{asset['id']}", use_container_width=True):
-                try:
-                    # esc() is display-only — never escape ids or values sent back to the API.
-                    delete_asset(asset["id"])
-                    st.success(f"Deleted asset: {asset['name']}")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Could not delete asset: {exc}")
-        st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        st.info("No assets added yet.")
-
-    # Keep the creation form collapsed below the current list so the record-management view stays focused.
-    with st.expander("Add a New Asset", expanded=not assets):
-        with st.form("add_asset_form", clear_on_submit=True):
-            form_left, form_right = st.columns(2)
-            with form_left:
-                name = st.text_input("Asset name", key="new_asset_name")
-                brand = st.text_input("Brand", key="new_asset_brand")
-                room = st.text_input("Room", key="new_asset_room")
-            with form_right:
-                model_number = st.text_input("Model number", key="new_asset_model_number")
-                install_date = st.date_input("Install date", value=None, key="install_date")
-                warranty_end_date = st.date_input("Warranty end date", value=None, key="warranty_end_date")
-
-            add_new_asset = st.form_submit_button("Add asset", use_container_width=True)
-
-    if add_new_asset:
-        if not name.strip():
-            st.warning("Enter an asset name.")
-        else:
-            try:
-                post_json(
-                    "/assets",
-                    payload={
-                        "name": name.strip(),
-                        "household_id": st.session_state.active_household_id,
-                        "brand": brand.strip() or None,
-                        "model_number": model_number.strip() or None,
-                        "room": room.strip() or None,
-                        "install_date": install_date.isoformat() if install_date else None,
-                        "warranty_end_date": warranty_end_date.isoformat() if warranty_end_date else None,
-                    },
-                )
-                st.success(f"Saved asset: {name.strip()}")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Could not save asset: {exc}")
      
 def render_docs_tab() -> None:
-    st.markdown('<div class="hb-page-kicker">Documents</div>', unsafe_allow_html=True)
-    st.markdown('<div class="hb-page-title">Save Docs</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="hb-page-subtitle">Add manuals, warranties, permits, and receipts so Home Buddy can cite them when it answers.</div>',
-        unsafe_allow_html=True,
-    )
-
+    is_indexing = st.session_state.get("document_indexing", False)
     try:
         entries = load_saved_documents()
     except Exception as exc:
@@ -984,11 +1075,28 @@ def render_docs_tab() -> None:
         "warranty, permit, or receipt": "warranty",
     }
 
-    left_col, right_col = st.columns([1.15, 1], gap="large")
     manual_count = sum(1 for entry in entries if entry["doc_type"] == "manual")
     coverage_count = len(entries) - manual_count
+    left_col, right_col = st.columns(
+        [1.5, 1],
+        gap="large",
+        vertical_alignment="top",
+    )
 
     with left_col:
+        # Keep the introduction in the left column so the add-document panel
+        # can share its top edge instead of starting below the page heading.
+        st.markdown(
+            """
+            <div class="hb-docs-intro">
+                <div class="hb-page-kicker">Documents</div>
+                <div class="hb-page-title">Save Docs</div>
+                <div class="hb-page-subtitle">Add manuals, warranties, permits, and receipts so Home Buddy can cite them when it answers.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         stat_a, stat_b, stat_c = st.columns(3)
         with stat_a:
             st.markdown(
@@ -1014,7 +1122,7 @@ def render_docs_tab() -> None:
             st.markdown(
                 f"""
                 <div class="hb-stat-card">
-                    <div class="hb-stat-value">{coverage_count}</div>
+                    <div class="hb-stat-value hb-stat-value-alt">{coverage_count}</div>
                     <div class="hb-stat-label">Coverage Docs</div>
                 </div>
                 """,
@@ -1028,22 +1136,28 @@ def render_docs_tab() -> None:
             for entry in entries:
                 doc_col, action_col = st.columns([4.4, 1.1], gap="small")
                 with doc_col:
-                    pretty_type = "Manual" if entry["doc_type"] == "manual" else "Warranty / Permit / Receipt"
+                    is_manual = entry["doc_type"] == "manual"
+                    pretty_type = "Manual" if is_manual else "Coverage"
+                    tag_class = "hb-tag-accent" if is_manual else "hb-tag-accent-2"
                     st.markdown(
                         f"""
-                        <div class="hb-card hb-compact-card">
-                            <div class="hb-card-title">{esc(entry['display_name'])}</div>
-                            <div class="hb-doc-meta">{pretty_type} · entry id: {esc(entry['entry_id'])}</div>
+                        <div class="hb-doc-row">
+                            <div class="hb-doc-icon">{icon("file", 20)}</div>
+                            <div style="min-width: 0; flex: 1;">
+                                <div class="hb-doc-name">{esc(entry['display_name'])}</div>
+                                <div class="hb-doc-meta">entry id: {esc(entry['entry_id'])}</div>
+                            </div>
+                            <span class="hb-tag {tag_class}">{pretty_type}</span>
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
                 with action_col:
-                    st.markdown("<div style='height: 0.85rem;'></div>", unsafe_allow_html=True)
                     if st.button(
                         "Delete",
                         key=f"prompt_delete_doc_{entry['entry_id']}",
                         use_container_width=True,
+                        disabled=is_indexing,
                     ):
                         # Store raw values: esc() is display-only, and the entry_id here is
                         # sent back to the delete endpoint, which must match the DB exactly.
@@ -1073,6 +1187,7 @@ def render_docs_tab() -> None:
                 "Confirm Delete Document",
                 key="confirm_delete_single_document",
                 use_container_width=True,
+                disabled=is_indexing,
             ):
                 try:
                     deleted_entry_id = st.session_state.pending_document_delete_entry_id
@@ -1096,6 +1211,7 @@ def render_docs_tab() -> None:
                 "Cancel",
                 key="cancel_delete_single_document",
                 use_container_width=True,
+                disabled=is_indexing,
             ):
                 st.session_state.pending_document_delete_entry_id = None
                 st.session_state.pending_document_delete_label = None
@@ -1105,6 +1221,7 @@ def render_docs_tab() -> None:
             "Clear All Saved Docs",
             key="prompt_clear_all_docs",
             use_container_width=True,
+            disabled=is_indexing,
         ):
             st.session_state.confirm_clear_all_docs = True
             st.session_state.docs_status = None
@@ -1121,6 +1238,7 @@ def render_docs_tab() -> None:
                 "Confirm Clear All Docs",
                 key="confirm_clear_all_docs_button",
                 use_container_width=True,
+                disabled=is_indexing,
             ):
                 try:
                     delete_all_documents()
@@ -1138,38 +1256,54 @@ def render_docs_tab() -> None:
                 "Keep Documents",
                 key="cancel_clear_all_docs_button",
                 use_container_width=True,
+                disabled=is_indexing,
             ):
                 st.session_state.confirm_clear_all_docs = False
                 st.rerun()
 
     with right_col:
-        st.markdown('<div class="hb-card hb-form-card">', unsafe_allow_html=True)
-        st.markdown('<div class="hb-section-label">Add a Document</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="hb-card-meta" style="margin-bottom: 0.85rem;">Choose how you want to add the file, then Home Buddy will index it for retrieval.</div>',
-            unsafe_allow_html=True,
-        )
-
-        with st.form("add_url_document_form", clear_on_submit=True):
-            new_name = st.text_input("Document name", key="new_entry_name")
-            new_url = st.text_input("PDF URL", key="new_download_url")
-            selected_doc_type = st.selectbox(
-                "Document type",
-                options=["— select —"] + list(doc_types.keys()),
-                key="url_doc_type",
+        # A keyed container carries the panel styling. An unmatched open/close
+        # st.markdown div pair would instead render as its own hollow box.
+        with st.container(key="hb_docs_form"):
+            st.markdown(
+                """
+                <div class="hb-ground-kicker">Add a document</div>
+                <div class="hb-card-meta" style="margin-bottom: 0.85rem;">Home Buddy indexes it for retrieval as soon as it lands.</div>
+                """,
+                unsafe_allow_html=True,
             )
-            add_url_document = st.form_submit_button("Add and index", use_container_width=True)
 
-        with st.form("upload_document_form", clear_on_submit=True):
-            uploaded_doc_name = st.text_input("Document name", key="upload_entry_name")
-            uploaded_file = st.file_uploader("Upload a PDF directly", type="pdf")
-            selected_upload_doc_type = st.selectbox(
-                "Upload document type",
-                options=["— select —"] + list(doc_types.keys()),
-                key="upload_doc_type",
-            )
-            upload_document = st.form_submit_button("Upload and index", use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+            with st.form("add_url_document_form", clear_on_submit=True):
+                new_name = st.text_input("Document name", key="new_entry_name", disabled=is_indexing)
+                new_url = st.text_input("PDF URL", key="new_download_url", disabled=is_indexing)
+                selected_doc_type = st.selectbox(
+                    "Document type",
+                    options=["— select —"] + list(doc_types.keys()),
+                    key="url_doc_type",
+                    disabled=is_indexing,
+                )
+                add_url_document = st.form_submit_button(
+                    "Add and index", use_container_width=True, type="primary", disabled=is_indexing
+                )
+
+            st.markdown('<div class="hr"></div>', unsafe_allow_html=True)
+
+            with st.form("upload_document_form", clear_on_submit=True):
+                uploaded_doc_name = st.text_input(
+                    "Document name", key="upload_entry_name", disabled=is_indexing
+                )
+                uploaded_file = st.file_uploader(
+                    "Upload a PDF directly", type="pdf", disabled=is_indexing
+                )
+                selected_upload_doc_type = st.selectbox(
+                    "Upload document type",
+                    options=["— select —"] + list(doc_types.keys()),
+                    key="upload_doc_type",
+                    disabled=is_indexing,
+                )
+                upload_document = st.form_submit_button(
+                    "Upload and index", use_container_width=True, disabled=is_indexing
+                )
 
     url_doc_type = doc_types.get(selected_doc_type)
     upload_doc_type = doc_types.get(selected_upload_doc_type)
@@ -1181,28 +1315,16 @@ def render_docs_tab() -> None:
             doc_name = new_name.strip()
             doc_url = new_url.strip()
             doc_entry_id = build_entry_id(doc_name, entries, download_url=doc_url)
-            try:
-                with st.spinner("Indexing..."):
-                    result = post_form(
-                        "/documents/index",
-                        data={
-                            "household_id": st.session_state.active_household_id,
-                            "entry_id": doc_entry_id,
-                            "session_id": st.session_state.session_id,
-                            "display_name": doc_name,
-                            "url": doc_url,
-                            "doc_type": url_doc_type,
-                        },
-                    )
-                remember_indexed_doc(
-                    display_name=doc_name,
-                    entry_id=doc_entry_id,
-                    chunks_indexed=result["chunks_indexed"],
-                )
-                st.success(f"Indexed {result['chunks_indexed']} chunks.")
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
+            begin_document_index(
+                {
+                    "source": "url",
+                    "display_name": doc_name,
+                    "entry_id": doc_entry_id,
+                    "url": doc_url,
+                    "doc_type": url_doc_type,
+                }
+            )
+            st.rerun()
 
     if upload_document:
         if uploaded_file is None:
@@ -1210,40 +1332,45 @@ def render_docs_tab() -> None:
         else:
             doc_name = (uploaded_doc_name or "").strip() or uploaded_file.name
             doc_entry_id = build_entry_id(doc_name, entries)
-            try:
-                with st.spinner("Indexing..."):
-                    result = post_form(
-                        "/documents/index",
-                        data={
-                            "household_id": st.session_state.active_household_id,
-                            "entry_id": doc_entry_id,
-                            "session_id": st.session_state.session_id,
-                            "display_name": doc_name,
-                            "doc_type": upload_doc_type,
-                        },
-                        files={
-                            "file": (
-                                uploaded_file.name,
-                                uploaded_file.getvalue(),
-                                uploaded_file.type or "application/pdf",
-                            )
-                        },
-                    )
-                remember_indexed_doc(
-                    display_name=doc_name,
-                    entry_id=doc_entry_id,
-                    chunks_indexed=result["chunks_indexed"],
-                )
-                st.success(f"Indexed {result['chunks_indexed']} chunks.")
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
+            begin_document_index(
+                {
+                    "source": "upload",
+                    "display_name": doc_name,
+                    "entry_id": doc_entry_id,
+                    "doc_type": upload_doc_type,
+                    "filename": uploaded_file.name,
+                    "content": uploaded_file.getvalue(),
+                    "content_type": uploaded_file.type or "application/pdf",
+                }
+            )
+            st.rerun()
+
+    if is_indexing:
+        finish_pending_document_index()
+
+
+def queue_chat_question(question: str | None = None) -> None:
+    """Commit a typed or suggested question before Streamlit rerenders widgets."""
+    if st.session_state.get("document_indexing", False):
+        return
+
+    candidate = question if question is not None else st.session_state.get("agent_input_top", "")
+    candidate = str(candidate or "").strip()
+    if not candidate:
+        return
+
+    st.session_state.pending_chat_question = candidate
+    st.session_state.chat_processing = True
+    # Callback-time mutation is safe and leaves a clean composer after the
+    # pending turn has been captured.
+    st.session_state.agent_input_top = ""
+
 
 def render_chat_tab() -> None:
     st.markdown('<div class="hb-page-kicker">Assistant</div>', unsafe_allow_html=True)
     st.markdown('<div class="hb-page-title">Chat</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="hb-page-subtitle">Ask Home Buddy about troubleshooting, coverage, safety, reminders, and household operations.</div>',
+        '<div class="hb-page-subtitle">Ask Home Buddy about troubleshooting, coverage, safety, reminders, and household operations. Answers are grounded in the documents you have saved.</div>',
         unsafe_allow_html=True,
     )
 
@@ -1261,9 +1388,11 @@ def render_chat_tab() -> None:
         st.warning(f"Could not load conversation history: {exc}")
 
     saved_docs = load_saved_documents()
+    monogram = initials(st.session_state.current_user)
+
     if saved_docs:
         st.markdown(
-            '<div class="hb-chat-note">🤖 Home Buddy will use your saved documents and agent workflow to answer grounded questions.</div>',
+            f'<div class="hb-chat-note">{icon("check", 16)}Home Buddy will answer from your saved documents and cite what it used.</div>',
             unsafe_allow_html=True,
         )
     elif not st.session_state.agent_messages:
@@ -1277,152 +1406,175 @@ def render_chat_tab() -> None:
             unsafe_allow_html=True,
         )
 
-    with st.form("agent_query_form", clear_on_submit=True):
-        question = st.text_input(
-            "Ask HomeBuddy",
-            key="agent_input_top",
-            placeholder="Try: Why is my tire pressure light on?",
-            disabled=st.session_state.get("chat_processing", False),
-        )
-        submit_question = st.form_submit_button(
-            "Send",
-            use_container_width=True,
-            disabled=st.session_state.get("chat_processing", False),
-        )
-
-    if submit_question and question.strip():
-        st.session_state.pending_chat_question = question.strip()
-        st.session_state.chat_processing = True
-        st.rerun()
-
-    pending_question = st.session_state.get("pending_chat_question")
-    if pending_question:
-        with st.chat_message("user", avatar="🧑‍💻"):
-            st.markdown(pending_question)
-
-        with st.chat_message("assistant", avatar="🤖"):
-            status_placeholder = st.empty()
-            answer_placeholder = st.empty()
-            try:
-                status_placeholder.markdown(render_streaming_status(), unsafe_allow_html=True)
-                progress_messages: list[str] = []
-                final_result = None
-                streamed_answer = ""
-                for event in stream_query(
-                    {
-                        "question": pending_question,
-                        "session_id": st.session_state.session_id,
-                        "household_id": st.session_state.active_household_id,
-                        "household_zip_code": st.session_state.active_household_zip,
-                    }
-                ):
-                    event_type = event.get("type")
-                    if event_type == "status":
-                        progress_messages.append(event["message"])
-                        status_placeholder.markdown(
-                            render_streaming_status(progress_messages),
-                            unsafe_allow_html=True,
-                        )
-                    elif event_type == "token":
-                        streamed_answer += event.get("text", "")
-                        answer_placeholder.markdown(streamed_answer)
-                    elif event_type == "final":
-                        final_result = event["result"]
-                    elif event_type == "error":
-                        raise RuntimeError(event["message"])
-
-                if final_result is None:
-                    raise RuntimeError("Streaming query completed without a final result.")
-
-                answer = final_result["answer"]
-                question_for_history = final_result.get("sanitized_query") or pending_question
-                st.session_state.pending_case_draft = final_result.get("case_draft")
-                st.session_state.edit_case_draft = False
-                st.session_state.case_draft_status = None
-                st.session_state.case_draft_status_level = None
-
-                st.session_state.pending_task_draft = final_result.get("task_draft")
-                st.session_state.edit_task_draft = False
-                st.session_state.task_draft_status = None
-                st.session_state.task_draft_status_level = None
-                contractor_suggestions = final_result.get("contractor_suggestions", [])
-                st.session_state.last_agent_turn = {
-                    "question": question_for_history,
-                    "answer": answer,
-                    "contractor_suggestions": contractor_suggestions,
-                    "case_draft": final_result.get("case_draft"),
-                    "task_draft": final_result.get("task_draft"),
-                }
-
-                status_placeholder.empty()
-                answer_placeholder.markdown(answer)
-                render_contractor_suggestions(contractor_suggestions)
-                st.session_state.agent_messages.append({"role": "user", "content": question_for_history})
-                st.session_state.agent_messages.append({"role": "assistant", "content": answer})
-                st.session_state.pending_chat_question = None
-                st.session_state.chat_processing = False
-                st.rerun()
-            except Exception as exc:
-                st.session_state.chat_processing = False
-                st.session_state.pending_chat_question = None
-                status_placeholder.empty()
-                st.error(str(exc))
-
+    # ---- thread ---------------------------------------------------------
+    # Oldest first, so the newest turn sits closest to the composer below.
     latest_turn = st.session_state.get("last_agent_turn")
     conversation_pairs = build_display_conversation_pairs(
         st.session_state.agent_messages,
         latest_turn,
     )
-    for index, (user_message, assistant_message) in enumerate(reversed(conversation_pairs)):
+
+    for index, (user_message, assistant_message) in enumerate(conversation_pairs):
         if user_message:
+            st.markdown(render_user_bubble(user_message, monogram), unsafe_allow_html=True)
+
+        if not assistant_message:
+            continue
+
+        is_latest_turn = bool(
+            latest_turn
+            and user_message == latest_turn.get("question")
+            and assistant_message == latest_turn.get("answer")
+        )
+
+        if is_latest_turn and is_urgent_turn(latest_turn):
+            # Urgent turns render as the safety card: the numbered steps come
+            # straight from the backend's hazard assessment.
             st.markdown(
-                f"""
-                <div class="hb-card hb-compact-card">
-                    <div class="hb-partial-title">You Asked</div>
-                    {esc(user_message)}
-                </div>
-                """,
+                render_safety_bubble(assistant_message, latest_turn.get("steps") or []),
                 unsafe_allow_html=True,
             )
-        if assistant_message:
-            preview = re.sub(r"\s+", " ", assistant_message).strip()[:96] or "Assistant response"
-            is_latest_turn = (
-                latest_turn
-                and user_message == latest_turn.get("question")
-                and assistant_message == latest_turn.get("answer")
-            )
-            with st.expander(f"🤖 {preview}", expanded=index == 0):
+        else:
+            with st.container(key=f"hb_answer_{index}"):
                 st.markdown(assistant_message)
-                if is_latest_turn:
-                    render_contractor_suggestions(
-                        latest_turn.get("contractor_suggestions") or []
+                if is_latest_turn and latest_turn.get("retrieval_context"):
+                    source_count = len(latest_turn["retrieval_context"])
+                    passage_noun = "passage" if source_count == 1 else "passages"
+                    st.markdown(
+                        f'<span class="hb-source-chip">{icon("file-min", 14)}'
+                        f"Grounded in {source_count} saved-document {passage_noun}</span>",
+                        unsafe_allow_html=True,
                     )
-                    render_case_draft_hitl()
-                    render_task_draft_hitl()
 
-    if latest_turn and not conversation_pairs:
-        st.markdown(
-            f"""
-            <div class="hb-card hb-compact-card">
-                <div class="hb-partial-title">You Asked</div>
-                {esc(latest_turn.get("question") or "")}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        with st.expander("🤖 Latest response", expanded=True):
-            st.markdown(latest_turn.get("answer") or "")
-            render_contractor_suggestions(
-                latest_turn.get("contractor_suggestions") or []
-            )
+        if is_latest_turn:
+            render_contractor_suggestions(latest_turn.get("contractor_suggestions") or [])
             render_case_draft_hitl()
             render_task_draft_hitl()
-    elif latest_turn is None:
+
+    if latest_turn is None:
         render_case_draft_hitl()
         render_task_draft_hitl()
 
+    # ---- in-flight turn -------------------------------------------------
+    pending_question = st.session_state.get("pending_chat_question")
+    if pending_question:
+        st.markdown(render_user_bubble(pending_question, monogram), unsafe_allow_html=True)
+
+        status_placeholder = st.empty()
+        answer_placeholder = st.empty()
+        try:
+            status_placeholder.markdown(render_streaming_status(), unsafe_allow_html=True)
+            progress_messages: list[str] = []
+            final_result = None
+            streamed_answer = ""
+            for event in stream_query(
+                {
+                    "question": pending_question,
+                    "session_id": st.session_state.session_id,
+                    "household_id": st.session_state.active_household_id,
+                    "household_zip_code": st.session_state.active_household_zip,
+                }
+            ):
+                event_type = event.get("type")
+                if event_type == "status":
+                    progress_messages.append(event["message"])
+                    status_placeholder.markdown(
+                        render_streaming_status(progress_messages),
+                        unsafe_allow_html=True,
+                    )
+                elif event_type == "token":
+                    streamed_answer += event.get("text", "")
+                    answer_placeholder.markdown(streamed_answer)
+                elif event_type == "final":
+                    final_result = event["result"]
+                elif event_type == "error":
+                    raise RuntimeError(event["message"])
+
+            if final_result is None:
+                raise RuntimeError("Streaming query completed without a final result.")
+
+            answer = final_result["answer"]
+            question_for_history = final_result.get("sanitized_query") or pending_question
+            st.session_state.pending_case_draft = final_result.get("case_draft")
+            st.session_state.edit_case_draft = False
+            st.session_state.case_draft_status = None
+            st.session_state.case_draft_status_level = None
+
+            st.session_state.pending_task_draft = final_result.get("task_draft")
+            st.session_state.edit_task_draft = False
+            st.session_state.task_draft_status = None
+            st.session_state.task_draft_status_level = None
+            contractor_suggestions = final_result.get("contractor_suggestions", [])
+            st.session_state.last_agent_turn = {
+                "question": question_for_history,
+                "answer": answer,
+                "contractor_suggestions": contractor_suggestions,
+                "case_draft": final_result.get("case_draft"),
+                "task_draft": final_result.get("task_draft"),
+                # Carried so the answer bubble can show a truthful grounding chip
+                # and urgent turns can render the safety card.
+                "retrieval_context": final_result.get("retrieval_context") or [],
+                "steps": final_result.get("steps") or [],
+                "urgency_level": final_result.get("urgency_level"),
+                "should_escalate": final_result.get("should_escalate", False),
+            }
+
+            status_placeholder.empty()
+            answer_placeholder.empty()
+            st.session_state.agent_messages.append({"role": "user", "content": question_for_history})
+            st.session_state.agent_messages.append({"role": "assistant", "content": answer})
+            st.session_state.pending_chat_question = None
+            st.session_state.chat_processing = False
+            st.rerun()
+        except Exception as exc:
+            st.session_state.chat_processing = False
+            st.session_state.pending_chat_question = None
+            status_placeholder.empty()
+            st.error(str(exc))
+
+    # ---- composer -------------------------------------------------------
+    is_processing = st.session_state.get("chat_processing", False)
+
+    if not is_processing:
+        st.markdown('<div class="hb-suggestions"></div>', unsafe_allow_html=True)
+        suggestion_cols = st.columns(len(CHAT_SUGGESTIONS))
+        for col, suggestion in zip(suggestion_cols, CHAT_SUGGESTIONS):
+            with col:
+                st.button(
+                    suggestion,
+                    key=f"suggest_{suggestion}",
+                    use_container_width=True,
+                    on_click=queue_chat_question,
+                    args=(suggestion,),
+                )
+
+    with st.form("agent_query_form"):
+        # Input and Send sit on one row so the composer reads as a single pill.
+        input_col, send_col = st.columns([6, 1], gap="small", vertical_alignment="bottom")
+        with input_col:
+            st.text_input(
+                "Ask HomeBuddy",
+                key="agent_input_top",
+                placeholder="Ask about a manual, a warranty, or something that just broke",
+                disabled=is_processing,
+                label_visibility="collapsed",
+            )
+        with send_col:
+            st.form_submit_button(
+                "Send",
+                use_container_width=True,
+                type="primary",
+                disabled=is_processing,
+                on_click=queue_chat_question,
+            )
+
+    st.markdown(
+        '<div class="hb-chat-hint">Answers are grounded in your saved documents and name what they were drawn from.</div>',
+        unsafe_allow_html=True,
+    )
+
     if st.session_state.agent_messages:
-        if st.button("🗑️ Clear agent conversation", key="clear_chat_button", use_container_width=True):
+        if st.button("Clear agent conversation", key="clear_chat_button", use_container_width=True):
             try:
                 clear_conversation_messages(st.session_state.session_id)
                 st.session_state.agent_messages = []
@@ -1631,363 +1783,1071 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Caprasimo&family=Figtree:wght@400;500;600;700&display=swap');
 
+    /* ---------------------------------------------------------------------
+       Organic design system tokens. This block is the source of truth for the
+       look; retune here rather than hard-coding colors further down.
+       --------------------------------------------------------------------- */
     :root {
-        --hb-bg: #f3f2f2;
-        --hb-surface: #fbfaf9;
-        --hb-card: #ffffff;
-        --hb-border: #ddd7d2;
-        --hb-text: #201e1d;
-        --hb-muted: #6d6660;
-        --hb-accent: #0088b0;
-        --hb-accent-soft: #e2f3f8;
+        --color-bg: #f5ead8;
+        --color-surface: #ebddc5;
+        --color-text: #201e1d;
+        --color-accent: #c67139;
+        --color-accent-2: #7a8a5e;
+        --color-divider: color-mix(in srgb, #201e1d 16%, transparent);
+
+        --color-neutral-100: #f9f4ed;
+        --color-neutral-200: #eee7db;
+        --color-neutral-300: #dcd3c4;
+        --color-neutral-400: #c0b6a5;
+        --color-neutral-500: #a19786;
+        --color-neutral-600: #82796a;
+        --color-neutral-700: #645c50;
+        --color-neutral-800: #474238;
+        --color-neutral-900: #2e2b25;
+
+        --color-accent-100: #fff2eb;
+        --color-accent-200: #ffe1d0;
+        --color-accent-300: #ffc6a5;
+        --color-accent-400: #f6a06b;
+        --color-accent-500: #d67f48;
+        --color-accent-600: #b2622d;
+        --color-accent-700: #8c491a;
+        --color-accent-800: #643312;
+        --color-accent-900: #402310;
+
+        --color-accent-2-100: #f0fae1;
+        --color-accent-2-200: #e1eecc;
+        --color-accent-2-300: #ccdbb2;
+        --color-accent-2-400: #aebf92;
+        --color-accent-2-500: #8fa073;
+        --color-accent-2-600: #728157;
+        --color-accent-2-700: #56633f;
+        --color-accent-2-800: #3d472b;
+        --color-accent-2-900: #272e1b;
+
+        --font-heading: "Caprasimo", system-ui, sans-serif;
+        --font-body: "Figtree", system-ui, sans-serif;
+
+        --radius-md: 16px;
+        --radius-lg: 28px;
+
+        --shadow-sm: 0 1px 2px color-mix(in srgb, #2e2b25 14%, transparent);
+        --shadow-md: 0 3px 10px color-mix(in srgb, #2e2b25 16%, transparent);
+        --shadow-lg: 0 12px 32px color-mix(in srgb, #2e2b25 22%, transparent);
+
+        /* Aliases so any older hb-* rule still resolves against the new palette. */
+        --hb-bg: var(--color-bg);
+        --hb-surface: var(--color-surface);
+        --hb-card: var(--color-neutral-100);
+        --hb-border: var(--color-divider);
+        --hb-text: var(--color-text);
+        --hb-muted: color-mix(in srgb, var(--color-text) 60%, transparent);
+        --hb-accent: var(--color-accent);
+        --hb-accent-soft: var(--color-accent-100);
     }
 
     html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
-        color: var(--hb-text);
+        font-family: var(--font-body);
+        color: var(--color-text);
     }
 
+    h1, h2, h3, h4, h5, h6 {
+        font-family: var(--font-heading);
+        font-weight: 400;
+        letter-spacing: -0.015em;
+        line-height: 1.12;
+    }
+
+    /* The ground: warm page field with two soft accent blooms, matching the
+       decorative circles in the canvas. Pinned + non-interactive so they never
+       intercept clicks on Streamlit widgets. */
     [data-testid="stAppViewContainer"] {
-        background: var(--hb-bg);
+        background: var(--color-bg);
+        position: relative;
     }
 
+    [data-testid="stAppViewContainer"]::before,
+    [data-testid="stAppViewContainer"]::after {
+        content: "";
+        position: fixed;
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 0;
+    }
+
+    [data-testid="stAppViewContainer"]::before {
+        top: -180px;
+        right: -140px;
+        width: 620px;
+        height: 620px;
+        background: radial-gradient(circle at 40% 40%, color-mix(in srgb, var(--color-accent-300) 60%, transparent), transparent 68%);
+    }
+
+    [data-testid="stAppViewContainer"]::after {
+        bottom: -220px;
+        left: -120px;
+        width: 560px;
+        height: 560px;
+        background: radial-gradient(circle at 60% 40%, color-mix(in srgb, var(--color-accent-2-300) 55%, transparent), transparent 66%);
+    }
+
+    /* The Streamlit toolbar floats over the designed canvas and creates a
+       phantom top-right control cluster. The app supplies its own navigation
+       and account actions, so remove the framework chrome from the surface. */
     [data-testid="stHeader"] {
         background: transparent;
+        height: 0;
+        min-height: 0;
     }
 
-    [data-testid="stSidebar"] {
-        display: none;
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"] {
+        display: none !important;
     }
+    [data-testid="stSidebar"] { display: none; }
 
     .block-container {
-        max-width: 1380px;
-        padding-top: 2rem;
+        max-width: 1440px;
+        padding-top: 1.75rem;
         padding-bottom: 2rem;
+        position: relative;
+        z-index: 1;
+    }
+
+    /* --- app shell ----------------------------------------------------- */
+
+    .st-key-hb_shell {
+        background: var(--color-neutral-200);
+        border-radius: 34px;
+        padding: 1.5rem 1.75rem 1.75rem;
+        box-shadow: var(--shadow-lg);
+    }
+
+    .st-key-hb_rail {
+        background: var(--color-surface);
+        border-radius: 34px;
+        padding: 1.4rem 1.15rem;
+        box-shadow: var(--shadow-md);
+        gap: 0.65rem !important;
+        align-self: flex-start !important;
+        margin-top: 0 !important;
+    }
+
+    /* Streamlit stretches each column to the height of the tallest sibling.
+       Keep the shorter navigation rail pinned to the top of that row instead
+       of letting it center itself beside a tall Documents page. */
+    [data-testid="stHorizontalBlock"]:has(.st-key-hb_rail) {
+        align-items: flex-start !important;
+    }
+
+    [data-testid="stColumn"]:has(.st-key-hb_rail) {
+        align-self: flex-start !important;
+        justify-content: flex-start !important;
+    }
+
+    [data-testid="stColumn"]:has(.st-key-hb_rail)
+    [data-testid="stVerticalBlock"] {
+        justify-content: flex-start !important;
+    }
+
+    .st-key-rail_sign_out {
+        margin-top: 1rem !important;
+    }
+
+    /* --- brand lockup -------------------------------------------------- */
+
+    .hb-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 1.35rem;
+    }
+
+    .hb-brand-mark {
+        width: 40px;
+        height: 40px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--color-accent);
+        color: var(--color-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: var(--shadow-sm);
+    }
+
+    .hb-brand-mark svg { display: block; }
+
+    .hb-brand-name {
+        font-family: var(--font-heading);
+        font-size: 1.25rem;
+        line-height: 1.1;
+    }
+
+    .hb-brand-sub {
+        font-size: 0.75rem;
+        color: var(--hb-muted);
+    }
+
+    .hb-rail-title {
+        font-family: var(--font-heading);
+        font-size: 1.25rem;
+        line-height: 1.1;
+    }
+
+    .hb-rail-subtitle {
+        color: var(--hb-muted);
+        font-size: 0.75rem;
+        margin-bottom: 0.9rem;
+    }
+
+    .hb-rail-label {
+        font-size: 0.625rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: color-mix(in srgb, var(--color-text) 50%, transparent);
+        margin: 0 0 0.5rem 0.875rem;
+    }
+
+    /* Rail nav pills: active state comes from Streamlit's primary button kind,
+       so the selected view reads as a filled accent pill. */
+    [class*="st-key-nav_"] > div > button {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 12px;
+        border: 0 !important;
+        border-radius: 999px !important;
+        background: transparent !important;
+        color: var(--color-text) !important;
+        font-family: var(--font-body) !important;
+        font-size: 0.94rem !important;
+        font-weight: 500 !important;
+        min-height: 46px;
+        padding: 0 1rem;
+        box-shadow: none !important;
+    }
+
+    /* Streamlit wraps the label in two nested flex boxes that both center it;
+       the rail wants it flush left against the icon. */
+    [class*="st-key-nav_"] > div > button > div,
+    [class*="st-key-nav_"] > div > button > div > span {
+        justify-content: flex-start !important;
+        text-align: left !important;
+    }
+
+    [class*="st-key-nav_"] > div > button p {
+        text-align: left !important;
+        margin: 0;
+    }
+
+    /* Nav icons are masked SVGs painted with currentColor, so they invert
+       automatically when the pill becomes the filled active state. */
+    [class*="st-key-nav_"] > div > button::before {
+        content: "";
+        width: 20px;
+        height: 20px;
+        flex: none;
+        background-color: currentColor;
+        -webkit-mask: var(--nav-icon) center / 20px 20px no-repeat;
+        mask: var(--nav-icon) center / 20px 20px no-repeat;
+    }
+
+    .st-key-nav_chat > div > button {
+        --nav-icon: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7.9 20A9 9 0 1 0 4 16.1L2 22Z'/%3E%3C/svg%3E");
+    }
+
+    .st-key-nav_docs > div > button {
+        --nav-icon: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/%3E%3C/svg%3E");
+    }
+
+    .st-key-nav_profile > div > button {
+        --nav-icon: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='8' r='5'/%3E%3Cpath d='M20 21a8 8 0 0 0-16 0'/%3E%3C/svg%3E");
+    }
+
+    .st-key-nav_cases > div > button {
+        --nav-icon: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/%3E%3Cpath d='M14 2v4a2 2 0 0 0 2 2h4'/%3E%3C/svg%3E");
+    }
+
+    .st-key-nav_tasks > div > button {
+        --nav-icon: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+    }
+
+    [class*="st-key-nav_"] > div > button:hover {
+        background: color-mix(in srgb, var(--color-text) 7%, transparent) !important;
+    }
+
+    [class*="st-key-nav_"] > div > button[kind="primary"] {
+        background: var(--color-accent) !important;
+        color: var(--color-bg) !important;
+        font-weight: 600 !important;
+        box-shadow: var(--shadow-md) !important;
+    }
+
+    [class*="st-key-nav_"] > div > button[kind="primary"]:hover {
+        background: var(--color-accent-600) !important;
+    }
+
+    /* --- grounding card + account chip in the rail --------------------- */
+
+    .hb-ground-card {
+        padding: 1rem;
+        border-radius: 24px;
+        background: var(--color-neutral-100);
+        box-shadow: var(--shadow-sm);
+        margin-top: 0;
+        margin-bottom: 1rem
+    }
+
+    .hb-ground-kicker {
+        font-size: 0.625rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--color-accent-700);
+        margin-bottom: 0.4rem;
+    }
+
+    .hb-ground-body {
+        font-size: 0.875rem;
+        line-height: 1.4;
+    }
+
+    .hb-account-chip {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--color-text) 5%, transparent);
+        margin-top: 0;
+    }
+
+    .hb-avatar {
+        width: 32px;
+        height: 32px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--color-accent-2);
+        color: var(--color-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.8rem;
+        font-weight: 700;
+    }
+
+    .hb-avatar-lg {
+        width: 62px;
+        height: 62px;
+        font-size: 1.25rem;
+    }
+
+    .hb-account-email {
+        font-size: 0.75rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: color-mix(in srgb, var(--color-text) 70%, transparent);
+    }
+
+    /* --- top bar ------------------------------------------------------- */
+
+    .hb-topbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 58px;
+        padding: 0 0.25rem 0.9rem;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid var(--color-divider);
+        flex-wrap: wrap;
+    }
+
+    .hb-crumb {
+        font-size: 0.875rem;
+        color: color-mix(in srgb, var(--color-text) 60%, transparent);
+    }
+
+    .hb-crumb-current {
+        font-size: 0.875rem;
+        font-weight: 600;
+    }
+
+    .hb-topbar-spacer { margin-left: auto; }
+
+    /* --- page headings ------------------------------------------------- */
+
+    .hb-page-kicker {
+        color: var(--color-accent-700);
+        font-size: 0.6875rem;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 0.4rem;
+    }
+
+    .hb-page-title {
+        font-family: var(--font-heading);
+        font-size: 2.5rem;
+        font-weight: 400;
+        line-height: 1.12;
+        letter-spacing: -0.015em;
+        margin-bottom: 0.4rem;
+    }
+
+    .hb-page-subtitle {
+        color: color-mix(in srgb, var(--color-text) 68%, transparent);
+        font-size: 0.95rem;
+        line-height: 1.6;
+        margin-bottom: 1.4rem;
+        max-width: 64ch;
+    }
+
+    .hb-section-label {
+        color: var(--hb-muted);
+        font-size: 0.6875rem;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin: 0 0 0.65rem;
     }
 
     .main-header {
-        font-family: 'Instrument Serif', serif;
-        color: var(--hb-text);
-        font-size: 3.5rem;
+        font-family: var(--font-heading);
+        font-weight: 400;
+        color: var(--color-text);
+        font-size: 3.25rem;
+        line-height: 1.1;
         margin: 0;
     }
 
     .sub-header {
-        color: var(--hb-muted);
+        color: color-mix(in srgb, var(--color-text) 68%, transparent);
         font-size: 0.96rem;
-        margin: 0.4rem 3.5 rem 0;
+        margin: 0.4rem 0 0;
     }
 
     .hb-rule {
         width: 160px;
         height: 4px;
-        background: var(--hb-accent);
+        background: var(--color-accent);
         border-radius: 999px;
         margin: 0.85rem 0 1.1rem;
     }
 
-    .hb-header-wrap {
-        margin-bottom: 0.5rem;
-    }
+    .hb-header-wrap { margin-bottom: 0.75rem; }
 
-    /* Targeting the st-key-* class lets these rules land on the actual container that
-       wraps the tab content / nav buttons, instead of an empty div from an unmatched
-       open/close st.markdown pair (which rendered as its own hollow, floating box). */
-    .st-key-hb_shell {
-        background: var(--hb-surface);
-        border: 1px solid var(--hb-border);
-        border-radius: 28px;
-        padding: 1.25rem;
-        box-shadow: 0 10px 30px rgba(32, 30, 29, 0.06);
-    }
-
-    .st-key-hb_rail {
-        background: #f7f4f1;
-        border: 1px solid var(--hb-border);
-        border-radius: 22px;
-        padding: 1rem;
-    }
-
-    .hb-rail-title {
-        font-family: 'Instrument Serif', serif;
-        font-size: 1.7rem;
-        margin-bottom: 0.25rem;
-    }
-
-    .hb-rail-subtitle {
-        color: var(--hb-muted);
-        font-size: 0.84rem;
-        margin-bottom: 1rem;
-    }
-
-    .hb-page-kicker {
-        color: var(--hb-muted);
-        font-size: 0.76rem;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        margin-bottom: 0.35rem;
-    }
-
-    .hb-page-title {
-        font-size: 1.9rem;
-        font-weight: 600;
-        margin-bottom: 0.25rem;
-    }
-
-    .hb-page-subtitle {
-        color: var(--hb-muted);
-        font-size: 0.96rem;
-        margin-bottom: 1.5rem;
-        max-width: 72ch;
-    }
-
-    .hb-section-label {
-        color: var(--hb-muted);
-        font-size: 0.72rem;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        margin: 0 0 0.65rem;
-    }
+    /* --- cards --------------------------------------------------------- */
 
     .hb-card {
-        background: var(--hb-card);
-        border: 1px solid var(--hb-border);
-        border-radius: 18px;
-        padding: 1rem 1.05rem;
+        background: var(--color-neutral-100);
+        border-radius: 26px;
+        padding: 1.1rem 1.25rem;
         margin-bottom: 0.8rem;
-        box-shadow: 0 6px 14px rgba(32, 30, 29, 0.04);
+        box-shadow: var(--shadow-sm);
     }
 
-    .hb-form-card {
-        padding-bottom: 0.5rem;
-    }
-
-    .hb-compact-card {
-        padding: 0.9rem 1rem;
-    }
+    .hb-form-card { padding-bottom: 0.5rem; }
+    .hb-compact-card { padding: 0.95rem 1.1rem; }
 
     .hb-empty-card {
-        background: #fcfbfa;
+        background: var(--color-neutral-100);
+        border: 1px dashed color-mix(in srgb, var(--color-text) 25%, transparent);
+        box-shadow: none;
     }
 
     .hb-card-title {
-        font-size: 1rem;
-        font-weight: 600;
-        color: var(--hb-text);
+        font-family: var(--font-heading);
+        font-size: 1.05rem;
+        font-weight: 400;
+        line-height: 1.2;
+        color: var(--color-text);
         margin-bottom: 0.25rem;
     }
 
     .hb-card-body,
     .hb-card-meta {
         color: var(--hb-muted);
-        font-size: 0.9rem;
-        line-height: 1.45;
+        font-size: 0.875rem;
+        line-height: 1.5;
     }
 
+    /* --- stat tiles ---------------------------------------------------- */
+
     .hb-stat-card {
-        background: var(--hb-card);
-        border: 1px solid var(--hb-border);
-        border-radius: 18px;
-        padding: 1rem;
-        text-align: center;
+        background: var(--color-neutral-100);
+        border-radius: 28px;
+        padding: 1.35rem;
+        box-shadow: var(--shadow-md);
     }
 
     .hb-stat-value {
-        font-size: 1.6rem;
-        font-weight: 700;
-        color: var(--hb-accent);
+        font-family: var(--font-heading);
+        font-size: 2.35rem;
+        font-weight: 400;
+        line-height: 1.05;
+        color: var(--color-accent);
     }
+
+    .hb-stat-value-alt { color: var(--color-accent-2); }
 
     .hb-stat-label {
-        font-size: 0.76rem;
+        font-size: 0.6875rem;
         color: var(--hb-muted);
         text-transform: uppercase;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.1em;
+        margin-top: 0.25rem;
     }
 
-    .hb-stack-gap {
-        margin-top: 1rem;
+    .hb-stack-gap { margin-top: 1rem; }
+
+    /* --- chat thread --------------------------------------------------- */
+
+    @keyframes hbPulse {
+        0%, 100% { opacity: 0.35; transform: translateY(0); }
+        50% { opacity: 1; transform: translateY(-2px); }
     }
 
-    .hb-chat-note {
-        background: #f8fbfc;
-        border: 1px solid #d7ebf2;
-        border-radius: 16px;
-        padding: 0.9rem 1rem;
-        color: var(--hb-muted);
-        font-size: 0.92rem;
-        margin-bottom: 1rem;
+    .hb-msg {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        margin-bottom: 1.1rem;
     }
 
+    .hb-msg-user {
+        justify-content: flex-end;
+        align-items: flex-end;
+    }
+
+    .hb-msg-avatar {
+        width: 36px;
+        height: 36px;
+        flex: none;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: var(--shadow-sm);
+        background: var(--color-neutral-100);
+        color: var(--color-accent);
+    }
+
+    .hb-msg-avatar svg { display: block; }
+
+    .hb-msg-avatar-user {
+        background: var(--color-accent-2);
+        color: var(--color-bg);
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+
+    .hb-msg-avatar-safety {
+        background: var(--color-accent);
+        color: var(--color-bg);
+    }
+
+    .hb-bubble-user {
+        max-width: 62%;
+        padding: 16px 22px;
+        border-radius: 26px 26px 8px 26px;
+        background: var(--color-accent);
+        color: var(--color-bg);
+        font-size: 0.95rem;
+        line-height: 1.55;
+        box-shadow: var(--shadow-md);
+    }
+
+    .hb-bubble-answer {
+        max-width: 74%;
+        padding: 18px 24px;
+        border-radius: 8px 26px 26px 26px;
+        background: var(--color-neutral-100);
+        box-shadow: var(--shadow-md);
+    }
+
+    .hb-bubble-answer p:last-child { margin-bottom: 0; }
+
+    .hb-source-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0.85rem 0 0.2rem;
+        padding: 8px 16px;
+        border-radius: 999px;
+        background: var(--color-bg);
+        box-shadow: var(--shadow-sm);
+        font-size: 0.75rem;
+        max-width: 100%;
+        white-space: normal;
+        color: var(--color-accent-800);
+    }
+
+    .hb-source-chip svg { flex: none; }
+
+    /* safety variant — urgent answers get the stop-and-do-this treatment */
+    .hb-bubble-safety {
+        max-width: 74%;
+        border-radius: 8px 26px 26px 26px;
+        background: var(--color-accent-100);
+        box-shadow: var(--shadow-md);
+        overflow: hidden;
+    }
+
+    .hb-safety-head {
+        padding: 14px 24px;
+        background: var(--color-accent-200);
+        font-size: 0.6875rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--color-accent-800);
+    }
+
+    .hb-safety-body {
+        padding: 18px 24px 22px;
+        color: var(--color-accent-900);
+    }
+
+    .hb-safety-body p:last-child { margin-bottom: 0; }
+
+    .hb-step {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        padding: 12px 16px;
+        border-radius: 20px;
+        background: var(--color-neutral-100);
+        box-shadow: var(--shadow-sm);
+        margin-top: 0.6rem;
+        color: var(--color-text);
+    }
+
+    .hb-step-n {
+        width: 24px;
+        height: 24px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--color-accent);
+        color: var(--color-bg);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+
+    .hb-step-text {
+        font-size: 0.875rem;
+        line-height: 1.5;
+    }
+
+    /* status card while the agent runs */
     .hb-chat-status {
-        background: #fcfbfa;
-        border: 1px solid var(--hb-border);
-        border-radius: 16px;
-        padding: 0.9rem 1rem;
-        color: var(--hb-text);
+        min-width: 340px;
+        max-width: 74%;
+        padding: 18px 22px;
+        border-radius: 8px 26px 26px 26px;
+        background: var(--color-neutral-100);
+        box-shadow: var(--shadow-md);
         margin-bottom: 1rem;
     }
 
     .hb-chat-status-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
         color: var(--hb-muted);
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.08em;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
-        margin-bottom: 0.45rem;
+        margin-bottom: 0.65rem;
+    }
+
+    .hb-dots { display: inline-flex; gap: 4px; }
+
+    .hb-dots span {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--color-accent);
+        animation: hbPulse 1.1s ease-in-out infinite;
+    }
+
+    .hb-dots span:nth-child(2) { animation-delay: 0.18s; }
+    .hb-dots span:nth-child(3) { animation-delay: 0.36s; }
+
+    .hb-status-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.875rem;
+        line-height: 1.5;
+        color: color-mix(in srgb, var(--color-text) 78%, transparent);
+        margin-top: 0.5rem;
+    }
+
+    .hb-status-tick {
+        width: 20px;
+        height: 20px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--color-accent-2-200);
+        color: var(--color-accent-2-800);
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
 
     .hb-chat-status-body {
         color: var(--hb-muted);
-        font-size: 0.92rem;
+        font-size: 0.9rem;
         line-height: 1.55;
     }
 
+    .hb-chat-note {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: var(--color-accent-2-100);
+        border-radius: 22px;
+        padding: 0.9rem 1.15rem;
+        color: var(--color-accent-2-900);
+        font-size: 0.9rem;
+        margin-bottom: 1rem;
+    }
+
+    .hb-chat-hint {
+        font-size: 0.78rem;
+        color: color-mix(in srgb, var(--color-text) 50%, transparent);
+        padding-left: 0.4rem;
+        margin-top: 0.35rem;
+    }
+
+    /* Assistant answers stay real Streamlit markdown (lists, bold, code all
+       keep working), so the bubble is painted onto their keyed container and
+       the avatar is drawn as a ::before rather than as sibling markup. */
+    [class*="st-key-hb_answer_"] {
+        position: relative;
+        margin: 0 0 1.1rem 48px;
+        max-width: 74%;
+        padding: 18px 24px 30px;
+        border-radius: 8px 26px 26px 26px;
+        background: var(--color-neutral-100);
+        box-shadow: var(--shadow-md);
+    }
+
+    [class*="st-key-hb_answer_"]::before {
+        content: "";
+        position: absolute;
+        left: -48px;
+        top: 0;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        box-shadow: var(--shadow-sm);
+        background:
+            var(--color-neutral-100)
+            url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c67139' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z'/%3E%3C/svg%3E")
+            center / 18px 18px no-repeat;
+    }
+
+    [class*="st-key-hb_answer_"] .stMarkdown p:last-child { margin-bottom: 0; }
+
+    /* Suggestion chips above the composer */
+    [class*="st-key-suggest_"] > div > button {
+        border-radius: 999px !important;
+        border: 1px solid var(--color-divider) !important;
+        background: var(--color-neutral-100) !important;
+        color: var(--color-text) !important;
+        font-family: var(--font-body) !important;
+        font-size: 0.8rem !important;
+        font-weight: 400 !important;
+        min-height: 38px;
+        box-shadow: none !important;
+    }
+
+    [class*="st-key-suggest_"] > div > button:hover {
+        background: var(--color-accent-100) !important;
+        border-color: var(--color-accent-300) !important;
+    }
+
     .hb-partial-block {
-        background: #fcfbfa;
-        border: 1px solid var(--hb-border);
-        border-radius: 16px;
-        padding: 0.95rem 1rem;
+        background: var(--color-neutral-100);
+        border-radius: 22px;
+        padding: 0.95rem 1.1rem;
         margin-bottom: 0.9rem;
+        box-shadow: var(--shadow-sm);
     }
 
     .hb-partial-title {
         color: var(--hb-muted);
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.08em;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
         margin-bottom: 0.55rem;
     }
 
+    /* --- documents ----------------------------------------------------- */
+
+    .hb-docs-intro .hb-page-subtitle {
+        margin-bottom: 0.35rem;
+    }
+
+    .hb-doc-row {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 1rem 1.15rem;
+        border-radius: 26px;
+        background: var(--color-neutral-100);
+        box-shadow: var(--shadow-sm);
+    }
+
+    /* Keep each document action vertically aligned with its card without a
+       brittle spacer that changes as soon as the row wraps. */
+    [data-testid="stHorizontalBlock"]:has(.hb-doc-row) {
+        align-items: center;
+        margin-bottom: 0.75rem;
+    }
+
+    .st-key-prompt_clear_all_docs {
+        margin-top: 0.25rem;
+    }
+
+    .hb-doc-icon {
+        width: 44px;
+        height: 44px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--color-bg);
+        color: var(--color-accent);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .hb-doc-icon svg { display: block; }
+
+    /* Add-a-document panel */
+    .st-key-hb_docs_form {
+        background: var(--color-surface);
+        border-radius: 30px;
+        padding: 1.5rem;
+        box-shadow: var(--shadow-md);
+    }
+
+    .hr {
+        height: 1px;
+        border: 0;
+        margin: 1.1rem 0;
+        background: var(--color-divider);
+    }
+
+    .hb-doc-name {
+        font-family: var(--font-heading);
+        font-size: 1.05rem;
+        font-weight: 400;
+        line-height: 1.2;
+    }
+
     .hb-doc-meta {
         color: var(--hb-muted);
-        font-size: 0.84rem;
+        font-size: 0.75rem;
         line-height: 1.45;
-    }
-    
-    .hb-auth-parent {
-        align-content: center;
-        width: 100vh;    
-        height: 100vh;
+        margin-top: 3px;
     }
 
-    .hb-auth-hero {
-        background:
-            radial-gradient(circle at top right, rgba(0, 136, 176, 0.16), transparent 34%),
-            linear-gradient(135deg, #fffaf6 0%, #f2f7f8 100%);
-        width: fit-content; 
-        margin-left: auto;
-        margin-right: auto;
-        height: fit-content;
-        border: 1px solid var(--hb-border);
-        border-radius: 24px;
-        padding: 1.25rem;
-        box-shadow: 0 12px 30px rgba(32, 30, 29, 0.06);
+    /* --- tags ---------------------------------------------------------- */
+
+    .hb-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0.35rem 0.85rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        line-height: 1.1;
+        white-space: nowrap;
     }
 
-    .hb-auth-shell {
-        margin-top: 3rem;
+    .hb-tag svg { flex: none; }
+    .hb-tag-neutral { background: var(--color-neutral-200); color: var(--color-neutral-800); }
+    .hb-tag-accent { background: var(--color-accent-100); color: var(--color-accent-800); }
+    .hb-tag-accent-2 { background: var(--color-accent-2-100); color: var(--color-accent-2-800); }
+
+    /* --- tables -------------------------------------------------------- */
+
+    .hb-table-wrap { margin-top: 0.6rem; }
+
+    .hb-table-head {
+        color: var(--hb-muted);
+        font-size: 0.6875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        padding-bottom: 0.55rem;
+        border-bottom: 1px solid var(--color-divider);
     }
 
-    .hb-auth-panel {
-        background: #fffdfb;
-        border: 1px solid var(--hb-border);
-        border-radius: 24px;
-        padding: 1.35rem;
-        min-height: 19rem;
-        box-shadow: 0 12px 30px rgba(32, 30, 29, 0.06);
+    .hb-table-cell {
+        border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+        padding: 0.85rem 0;
+        font-size: 0.9rem;
+        color: var(--color-text);
+        min-height: 3.1rem;
+    }
+
+    /* --- sign-in ------------------------------------------------------- */
+
+    .hb-auth-shell { margin-top: 1.5rem; }
+
+    .st-key-hb_auth_copy {
+        background: var(--color-neutral-100);
+        border-radius: 34px;
+        padding: 2.75rem 2.5rem;
+        box-shadow: var(--shadow-lg);
+    }
+
+    .st-key-hb_auth_hero {
+        position: relative;
+        background: var(--color-surface);
+        border-radius: 34px;
+        padding: 2.5rem 2.25rem;
+        box-shadow: var(--shadow-lg);
+        overflow: hidden;
     }
 
     .hb-auth-eyebrow {
-        color: var(--hb-muted);
-        font-size: 0.74rem;
-        font-weight: 700;
-        letter-spacing: 0.08em;
+        color: var(--color-accent-700);
+        font-size: 0.6875rem;
+        font-weight: 600;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
         margin-bottom: 0.55rem;
     }
 
     .hb-auth-title {
-        font-family: 'Instrument Serif', serif;
-        font-size: 2rem;
-        line-height: 1.05;
-        margin-bottom: 0.8rem;
+        font-family: var(--font-heading);
+        font-weight: 400;
+        font-size: 2.6rem;
+        line-height: 1.1;
+        letter-spacing: -0.015em;
+        margin-bottom: 0.9rem;
+        max-width: 18ch;
     }
 
-    .hb-auth-list {
-        color: var(--hb-muted);
-        font-size: 0.94rem;
-        line-height: 1.6;
+    .hb-auth-hero-title {
+        font-family: var(--font-heading);
+        font-weight: 400;
+        font-size: 1.85rem;
+        line-height: 1.15;
+        margin-bottom: 1.1rem;
+        max-width: 22ch;
     }
 
     .hb-auth-copy {
-        color: var(--hb-muted);
-        font-size: 0.96rem;
-        line-height: 1.65;
-        margin-bottom: 1rem;
+        color: color-mix(in srgb, var(--color-text) 72%, transparent);
+        font-size: 1rem;
+        line-height: 1.7;
+        margin-bottom: 1.5rem;
+        max-width: 52ch;
     }
 
-    .hb-tag {
-        display: inline-block;
-        padding: 0.28rem 0.62rem;
+    .hb-auth-note {
+        font-size: 0.8rem;
+        color: var(--hb-muted);
+        margin-top: 1rem;
+    }
+
+    .hb-auth-feature {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 16px 18px;
+        border-radius: 22px;
+        background: var(--color-neutral-100);
+        box-shadow: var(--shadow-sm);
+        font-size: 0.875rem;
+        line-height: 1.45;
+        margin-bottom: 0.7rem;
+    }
+
+    .hb-auth-feature svg { flex: none; margin-top: 1px; }
+
+    /* Streamlit themes bare <a> with its own link color + underline, so the
+       CTA has to win on both properties explicitly. */
+    a.hb-signin-btn,
+    a.hb-signin-btn:link,
+    a.hb-signin-btn:visited {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 52px;
+        padding: 0 2.15rem;
         border-radius: 999px;
-        font-size: 0.78rem;
-        font-weight: 600;
-        line-height: 1.1;
+        background: var(--color-accent);
+        color: var(--color-bg) !important;
+        font-family: var(--font-heading);
+        font-weight: 400;
+        font-size: 1rem;
+        text-decoration: none !important;
+        box-shadow: var(--shadow-md);
     }
 
-    .hb-tag-neutral {
-        background: #efebe8;
-        color: #4f4842;
+    a.hb-signin-btn:hover {
+        background: var(--color-accent-600);
+        color: var(--color-bg) !important;
+        text-decoration: none !important;
     }
 
-    .hb-tag-accent {
-        background: var(--hb-accent-soft);
-        color: #086783;
-    }
-
-    .hb-table-wrap {
-        margin-top: 0.6rem;
-    }
-
-    .hb-table-head {
-        color: var(--hb-muted);
-        font-size: 0.74rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        padding-bottom: 0.55rem;
-    }
-
-    .hb-table-cell {
-        background: var(--hb-card);
-        border-top: 1px solid #eee8e3;
-        padding: 0.85rem 0;
-        font-size: 0.92rem;
-        color: var(--hb-text);
-        min-height: 3.1rem;
-    }
+    /* --- Streamlit widgets --------------------------------------------- */
 
     .stButton > button,
     .stFormSubmitButton > button {
-        border-radius: 14px;
-        border: 1px solid var(--hb-border);
-        background: #f6f1eb;
-        color: var(--hb-text);
-        font-weight: 600;
-        min-height: 2.8rem;
+        border-radius: 999px;
+        border: 1px solid var(--color-divider);
+        background: transparent;
+        color: var(--color-text);
+        font-family: var(--font-heading);
+        font-weight: 400;
+        min-height: 2.75rem;
     }
 
-    .stButton > button[kind="primary"],
-    .stFormSubmitButton > button[kind="primary"] {
-        background: var(--hb-text);
-        color: white;
-        border-color: var(--hb-text);
+    .stButton > button:hover,
+    .stFormSubmitButton > button:hover {
+        background: color-mix(in srgb, var(--color-text) 7%, transparent);
+        border-color: var(--color-divider);
+        color: var(--color-text);
+    }
+
+    /* Form submits report kind="primaryFormSubmit", so match on a prefix
+       rather than an exact value or the composer's Send stays outlined. */
+    .stButton > button[kind^="primary"],
+    .stFormSubmitButton > button[kind^="primary"] {
+        background: var(--color-accent);
+        color: var(--color-bg);
+        border-color: var(--color-accent);
+        box-shadow: var(--shadow-md);
+    }
+
+    .stButton > button[kind^="primary"]:hover,
+    .stFormSubmitButton > button[kind^="primary"]:hover {
+        background: var(--color-accent-600);
+        border-color: var(--color-accent-600);
+        color: var(--color-bg);
+    }
+
+    /* The composer is a single pill row in the design, so the form wrapper
+       itself carries no chrome. */
+    [data-testid="stForm"] {
+        border: 0;
+        padding: 0;
+        background: transparent;
     }
 
     .stTextInput input,
@@ -1995,10 +2855,30 @@ st.markdown("""
     .stDateInput input,
     .stSelectbox [data-baseweb="select"] > div,
     .stFileUploader section {
-        border-radius: 14px !important;
-        border-color: var(--hb-border) !important;
-        background: #fff !important;
-        color: var(--hb-text) !important;
+        border-radius: 999px !important;
+        border-color: var(--color-divider) !important;
+        background: var(--color-neutral-100) !important;
+        color: var(--color-text) !important;
+    }
+
+    .stTextArea textarea,
+    .stFileUploader section {
+        border-radius: 22px !important;
+    }
+
+    .stTextInput input:focus,
+    .stTextArea textarea:focus {
+        border-color: var(--color-accent) !important;
+        box-shadow: none !important;
+    }
+
+    button:focus-visible,
+    a:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible,
+    [role="combobox"]:focus-visible {
+        outline: 2px solid var(--color-accent) !important;
+        outline-offset: 2px !important;
     }
 
     .stTextInput input::placeholder,
@@ -2008,45 +2888,308 @@ st.markdown("""
     }
 
     .stFileUploader section,
-    .stFileUploader section * ,
+    .stFileUploader section *,
     .stFileUploader small {
-        color: var(--hb-text) !important;
+        color: var(--color-text) !important;
     }
 
     label, .stMarkdown, .stCaption, [data-testid="stWidgetLabel"] p {
-        color: var(--hb-text) !important;
+        color: var(--color-text) !important;
     }
 
     /* Selectbox / date picker portals render outside the styled container, so they need
        their own explicit background + text color to avoid inheriting the browser/OS dark theme. */
-    div[data-baseweb="popover"] {
-        background: #fff !important;
-    }
+    div[data-baseweb="popover"] { background: var(--color-neutral-100) !important; }
 
     div[data-baseweb="popover"] *,
     div[data-baseweb="calendar"] *,
     div[role="listbox"] * {
-        color: var(--hb-text) !important;
+        color: var(--color-text) !important;
     }
 
     div[data-baseweb="popover"] li:hover,
     div[role="option"]:hover {
-        background: var(--hb-accent-soft) !important;
+        background: var(--color-accent-100) !important;
     }
+
+    [data-testid="stExpander"] details {
+        border: 0;
+        border-radius: 26px;
+        background: var(--color-neutral-100);
+        box-shadow: var(--shadow-sm);
+    }
+
+    [data-testid="stExpander"] summary { border-radius: 26px; }
 
     .stChatMessage {
-        background: rgba(255, 255, 255, 0.72);
-        border: 1px solid var(--hb-border);
-        border-radius: 18px;
-        color: var(--hb-text);
+        background: transparent;
+        border: 0;
+        color: var(--color-text);
+        padding-left: 0;
+        padding-right: 0;
     }
 
-    .stChatMessage * {
-        color: var(--hb-text);
+    .stChatMessage * { color: var(--color-text); }
+
+    .stAlert { border-radius: 22px; }
+
+    /* --- responsive shell --------------------------------------------- */
+
+    @media (max-width: 900px) {
+        .block-container {
+            max-width: none;
+            padding: 0.9rem !important;
+        }
+
+        /* Streamlit keeps the desktop rail/content columns side by side at
+           widths where the rail is already too narrow. Stack the two app
+           regions, then turn the rail itself into a compact navigation bar. */
+        [data-testid="stHorizontalBlock"]:has(.st-key-hb_rail) {
+            flex-direction: column !important;
+            gap: 0.75rem !important;
+        }
+
+        [data-testid="stHorizontalBlock"]:has(.st-key-hb_rail)
+        > [data-testid="stColumn"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+
+        .st-key-hb_rail {
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.45rem !important;
+            padding: 0.85rem !important;
+            border-radius: 24px;
+        }
+
+        .st-key-hb_rail > .stElementContainer:has(.hb-brand) {
+            grid-column: 1 / -1;
+        }
+
+        .st-key-hb_rail .hb-brand {
+            margin-bottom: 0.1rem;
+        }
+
+        .st-key-hb_rail .hb-brand-sub,
+        .st-key-hb_rail .hb-rail-label,
+        .st-key-hb_rail > .stElementContainer:has(.hb-ground-card),
+        .st-key-hb_rail > .stElementContainer:has(.hb-account-chip),
+        .st-key-hb_rail > .st-key-rail_manage_docs,
+        .st-key-hb_rail > .st-key-rail_sign_out {
+            margin-top: 1rem;
+            display: none !important;
+        }
+
+        [class*="st-key-nav_"] > div > button {
+            justify-content: center;
+            gap: 6px;
+            min-height: 42px;
+            padding: 0 0.45rem;
+            font-size: 0.78rem !important;
+        }
+
+        [class*="st-key-nav_"] > div > button > div,
+        [class*="st-key-nav_"] > div > button > div > span,
+        [class*="st-key-nav_"] > div > button p {
+            justify-content: center !important;
+            text-align: center !important;
+        }
+
+        .st-key-hb_shell {
+            padding: 1rem !important;
+            border-radius: 24px;
+        }
+
+        .hb-topbar {
+            min-height: 46px;
+            gap: 8px;
+            margin-bottom: 0.85rem;
+            padding-bottom: 0.75rem;
+        }
+
+        .hb-page-title { font-size: 2.15rem; }
+
+        .hb-bubble-user {
+            max-width: 82%;
+            padding: 13px 18px;
+            border-radius: 22px 22px 6px 22px;
+        }
+
+        .hb-msg > .hb-msg-avatar {
+            display: none;
+        }
+
+        .hb-bubble-safety,
+        .hb-chat-status {
+            width: 100%;
+            min-width: 0;
+            max-width: 100%;
+            border-radius: 6px 22px 22px 22px;
+        }
+
+        [class*="st-key-hb_answer_"] {
+            width: 100%;
+            max-width: 100%;
+            margin-left: 0;
+            padding: 16px 18px 24px;
+            border-radius: 6px 22px 22px 22px;
+        }
+
+        [class*="st-key-hb_answer_"]::before {
+            display: none;
+        }
+
+        /* Starter prompts stay one compact, horizontally scrollable row. */
+        [data-testid="stHorizontalBlock"]:has([class*="st-key-suggest_"]) {
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            gap: 0.5rem !important;
+            overflow-x: auto;
+            padding-bottom: 0.25rem;
+            scrollbar-width: none;
+        }
+
+        [data-testid="stHorizontalBlock"]:has([class*="st-key-suggest_"])
+        > [data-testid="stColumn"] {
+            width: auto !important;
+            min-width: max-content;
+            flex: 0 0 auto !important;
+        }
+
+        /* Keep the chat field and Send action together as one composer row. */
+        [data-testid="stForm"]:has(input[aria-label="Ask HomeBuddy"])
+        [data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            align-items: flex-end !important;
+            gap: 0.5rem !important;
+        }
+
+        [data-testid="stForm"]:has(input[aria-label="Ask HomeBuddy"])
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
+            width: auto !important;
+            min-width: 0;
+            flex: 1 1 auto !important;
+        }
+
+        [data-testid="stForm"]:has(input[aria-label="Ask HomeBuddy"])
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {
+            width: 72px !important;
+            flex: 0 0 72px !important;
+        }
+
+        .hb-doc-row {
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .hb-auth-title {
+            font-size: clamp(2.05rem, 9.5vw, 2.6rem);
+        }
     }
 
-    .stAlert {
-        border-radius: 16px;
+    @media (max-width: 640px) {
+        .st-key-hb_auth_copy,
+        .st-key-hb_auth_hero {
+            padding: 2rem 1.5rem;
+            border-radius: 28px;
+        }
+
+        .hb-auth-shell { margin-top: 0.35rem; }
+        .hb-auth-hero-title { font-size: 1.6rem; }
+        .hb-auth-feature { padding: 14px 16px; }
+
+        .hb-topbar .hb-crumb,
+        .hb-topbar > svg {
+            display: none;
+        }
+
+        .hb-topbar-spacer { margin-left: 0; }
+        .hb-topbar .hb-tag { margin-left: auto; }
+
+        .hb-chat-note {
+            align-items: flex-start;
+            padding: 0.8rem 0.95rem;
+        }
+
+        .hb-safety-head { padding: 12px 18px; }
+        .hb-safety-body { padding: 16px 18px 18px; }
+        .hb-step { padding: 10px 12px; }
+
+        [data-testid="stHorizontalBlock"]:has(.hb-doc-row) {
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+        }
+
+        [data-testid="stHorizontalBlock"]:has(.hb-doc-row)
+        > [data-testid="stColumn"]:first-child {
+            width: auto !important;
+            min-width: 0;
+            flex: 1 1 auto !important;
+        }
+
+        [data-testid="stHorizontalBlock"]:has(.hb-doc-row)
+        > [data-testid="stColumn"]:last-child {
+            width: 82px !important;
+            flex: 0 0 82px !important;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .hb-dots span {
+            animation: none;
+        }
+    }
+
+    .hb-indexing-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 999999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+        background: color-mix(in srgb, var(--color-neutral-900) 48%, transparent);
+        backdrop-filter: grayscale(1) blur(2px);
+        cursor: wait;
+        pointer-events: all;
+    }
+
+    .hb-indexing-modal {
+        width: min(390px, calc(100vw - 3rem));
+        padding: 2rem;
+        border: 1px solid var(--color-divider);
+        border-radius: var(--radius-lg);
+        background: var(--color-neutral-100);
+        box-shadow: var(--shadow-lg);
+        text-align: center;
+    }
+
+    .hb-indexing-spinner {
+        width: 42px;
+        height: 42px;
+        margin: 0 auto 1.1rem;
+        border: 4px solid var(--color-accent-200);
+        border-top-color: var(--color-accent);
+        border-radius: 50%;
+        animation: hb-indexing-spin 0.8s linear infinite;
+    }
+
+    .hb-indexing-title {
+        margin-bottom: 0.45rem;
+        font-family: var(--font-heading);
+        font-size: 1.65rem;
+    }
+
+    .hb-indexing-copy {
+        color: var(--hb-muted);
+        font-size: 0.9rem;
+        line-height: 1.5;
+    }
+
+    @keyframes hb-indexing-spin {
+        to { transform: rotate(360deg); }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -2135,6 +3278,14 @@ if "chat_processing" not in st.session_state:
     st.session_state.chat_processing = False
 if "pending_chat_question" not in st.session_state:
     st.session_state.pending_chat_question = None
+if "document_indexing" not in st.session_state:
+    st.session_state.document_indexing = False
+if "pending_document_index" not in st.session_state:
+    st.session_state.pending_document_index = None
+if "auth_storage_action" not in st.session_state:
+    st.session_state.auth_storage_action = "read"
+if "logout_after_auth_clear" not in st.session_state:
+    st.session_state.logout_after_auth_clear = False
 
 st.session_state.doc_count = len(st.session_state.indexed_docs)
 if not HOME_OPERATIONS_ENABLED:
@@ -2176,13 +3327,59 @@ if str(st.query_params.get("logout", "")).strip() == "1":
     del st.query_params["logout"]
 handle_cognito_callback()
 
+# Handle the one-time OAuth callback before mounting the browser-storage
+# component. Its initial value can trigger a Streamlit rerun, which must never
+# interrupt an authorization-code exchange.
+auth_storage_action = st.session_state.auth_storage_action
+auth_storage_result = sync_browser_auth_storage(
+    auth_storage_action,
+    st.session_state.access_token if auth_storage_action == "write" else None,
+)
+auth_storage_ready = bool(
+    isinstance(auth_storage_result, dict)
+    and auth_storage_result.get("ready")
+    and auth_storage_result.get("action") == auth_storage_action
+)
+
+if auth_storage_action == "clear":
+    if not auth_storage_ready:
+        st.markdown("Signing out…")
+        st.stop()
+    st.session_state.auth_storage_action = "read"
+    if st.session_state.logout_after_auth_clear:
+        st.session_state.logout_after_auth_clear = False
+        st.query_params["logout"] = "1"
+    st.rerun()
+
+if auth_storage_action == "write" and auth_storage_ready:
+    st.session_state.auth_storage_action = "read"
+    st.rerun()
+
+# A browser refresh creates a new Streamlit session. Restore the access token
+# from the local component before deciding whether to show the sign-in screen.
+if not st.session_state.auth_signed_in and not st.query_params.get("code"):
+    if not auth_storage_ready:
+        st.stop()
+    stored_access_token = auth_storage_result.get("access_token")
+    if stored_access_token:
+        if jwt_is_expired(stored_access_token):
+            st.session_state.auth_error = "Your session expired. Please sign in again."
+            st.session_state.auth_storage_action = "clear"
+            st.rerun()
+        st.session_state.auth_token = stored_access_token
+        st.session_state.access_token = stored_access_token
+        st.session_state.auth_signed_in = True
+
 # Resolve auth-backed user and household state before rendering the main app.
 if st.session_state.auth_signed_in:
     try:
         st.session_state.current_user = load_current_user()
         st.session_state.households = get_json("/households")
-    except Exception as exc:
-        # If auth resolution fails, drop back to the sign-in screen instead of rendering a broken app shell.
+    except BackendRequestError as exc:
+        if exc.status_code not in {401, 403}:
+            st.error(f"HomeBuddy could not restore your workspace: {exc}")
+            st.info("Your sign-in is still saved. Refresh to try again.")
+            st.stop()
         st.session_state.auth_signed_in = False
         st.session_state.auth_token = None
         st.session_state.id_token = None
@@ -2190,6 +3387,13 @@ if st.session_state.auth_signed_in:
         st.session_state.current_user = None
         st.session_state.households = []
         st.session_state.auth_error = _format_session_restore_error(exc)
+        st.session_state.auth_storage_action = "clear"
+        st.rerun()
+    except Exception as exc:
+        # Network and backend availability failures must not silently sign the user out.
+        st.error(f"HomeBuddy could not restore your workspace: {exc}")
+        st.info("Your sign-in is still saved. Refresh to try again.")
+        st.stop()
 
 households = st.session_state.households
 
@@ -2209,49 +3413,127 @@ if not households:
 # Main layout
 # ---------------------------------------------------------------------------
 
-st.markdown('<div class="hb-header-wrap">', unsafe_allow_html=True)
-st.markdown('<p class="main-header">HomeBuddy</p>', unsafe_allow_html=True)
-st.markdown('<div class="hb-rule"></div>', unsafe_allow_html=True)
-st.markdown(
-    '<p class="sub-header">A grounded assistant for troubleshooting, documents, safety, and household follow-through.</p>',
-    unsafe_allow_html=True,
-)
-st.markdown('</div>', unsafe_allow_html=True)
+nav_options = {
+    "chat": "Chat",
+    "docs": "Save Docs",
+    "profile": "My Profile",
+}
+if HOME_OPERATIONS_ENABLED:
+    nav_options.update(
+        {
+            "cases": "My Cases",
+            "tasks": "My Tasks",
+        }
+    )
 
-nav_col, content_col = st.columns([0.95, 3.55], gap="large")
+if st.session_state.active_view not in nav_options:
+    st.session_state.active_view = "chat"
+
+current_user = st.session_state.current_user or {}
+account_email = current_user.get("email") or "your account"
+monogram = initials(current_user)
+household_name = households[0]["name"] if households else "Your household"
+
+# One read here feeds both the rail's grounding card and the top bar's tag.
+try:
+    grounded_docs = load_saved_documents()
+except Exception:
+    grounded_docs = []
+doc_count = len(grounded_docs)
+doc_noun = "document" if doc_count == 1 else "documents"
+
+if st.session_state.document_indexing:
+    render_document_indexing_overlay()
+
+nav_col, content_col = st.columns(
+    [0.95, 3.55],
+    gap="large",
+    vertical_alignment="top",
+)
 
 with nav_col:
     with st.container(key="hb_rail"):
-        st.markdown('<div class="hb-rail-title">HomeBuddy</div>', unsafe_allow_html=True)
         st.markdown(
-            f'<div class="hb-rail-subtitle">{esc((st.session_state.current_user or {}).get("email")) or "your account"}</div>',
+            f"""
+            <div class="hb-brand">
+                <div class="hb-brand-mark">{icon("home", 20)}</div>
+                <div>
+                    <div class="hb-brand-name">HomeBuddy</div>
+                    <div class="hb-brand-sub">{esc(household_name)}</div>
+                </div>
+            </div>
+            <div class="hb-rail-label">Workspace</div>
+            """,
             unsafe_allow_html=True,
         )
 
-        nav_options = {
-            "chat": "Chat",
-            "docs": "Save Docs",
-            "profile": "My Profile",
-        }
-        if HOME_OPERATIONS_ENABLED:
-            nav_options.update(
-                {
-                    "cases": "My Cases",
-                    "tasks": "My Tasks",
-                }
-            )
-
-        if st.session_state.active_view not in nav_options:
-            st.session_state.active_view = "chat"
-
         for view_key, label in nav_options.items():
             button_type = "primary" if st.session_state.active_view == view_key else "secondary"
-            if st.button(label, key=f"nav_{view_key}", use_container_width=True, type=button_type):
+            if st.button(
+                label,
+                key=f"nav_{view_key}",
+                use_container_width=True,
+                type=button_type,
+                disabled=st.session_state.document_indexing,
+            ):
                 st.session_state.active_view = view_key
                 st.rerun()
 
+        grounding_copy = (
+            f"{doc_count} {doc_noun} indexed and ready to cite."
+            if doc_count
+            else "No documents indexed yet — add one to ground answers."
+        )
+        st.markdown(
+            f"""
+            <div class="hb-ground-card">
+                <div class="hb-ground-kicker">Grounding</div>
+                <div class="hb-ground-body">{esc(grounding_copy)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button(
+            "Manage docs",
+            key="rail_manage_docs",
+            use_container_width=True,
+            disabled=st.session_state.document_indexing,
+        ):
+            st.session_state.active_view = "docs"
+            st.rerun()
+
+        st.markdown(
+            f"""
+            <div class="hb-account-chip">
+                <div class="hb-avatar">{esc(monogram)}</div>
+                <div class="hb-account-email">{esc(account_email)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button(
+            "Sign out",
+            key="rail_sign_out",
+            use_container_width=True,
+            disabled=st.session_state.document_indexing,
+        ):
+            sign_out()
+            st.rerun()
+
 with content_col:
     with st.container(key="hb_shell"):
+        st.markdown(
+            f"""
+            <div class="hb-topbar">
+                <span class="hb-crumb">Household</span>
+                {icon("chevron", 16, "color-mix(in srgb, var(--color-text) 40%, transparent)")}
+                <span class="hb-crumb-current">{esc(nav_options[st.session_state.active_view])}</span>
+                <span class="hb-topbar-spacer"></span>
+                <span class="hb-tag hb-tag-accent-2">{icon("check", 14)}{doc_count} docs grounded</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         if st.session_state.active_view == "docs":
             render_docs_tab()
         elif st.session_state.active_view == "chat":
