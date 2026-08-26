@@ -934,7 +934,7 @@ def finish_pending_document_index() -> None:
     finally:
         st.session_state.pending_document_index = None
         st.session_state.document_indexing = False
-        st.rerun()
+        st.rerun(scope="fragment")
 
 
 def render_document_indexing_overlay() -> None:
@@ -946,6 +946,41 @@ def render_document_indexing_overlay() -> None:
                 <div id="hb-indexing-title" class="hb-indexing-title">Saving new doc</div>
                 <div class="hb-indexing-copy">Home Buddy is indexing your document so it can be used in answers.</div>
             </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_grounding_summary(target, doc_count: int) -> None:
+    """Render the rail summary into a replaceable placeholder."""
+    doc_noun = "document" if doc_count == 1 else "documents"
+    grounding_copy = (
+        f"{doc_count} {doc_noun} indexed and ready to cite."
+        if doc_count
+        else "No documents indexed yet — add one to ground answers."
+    )
+    target.markdown(
+        f"""
+        <div class="hb-ground-card">
+            <div class="hb-ground-kicker">Grounding</div>
+            <div class="hb-ground-body">{esc(grounding_copy)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_topbar(target, current_view_label: str, doc_count: int) -> None:
+    """Render the shell header into a replaceable placeholder."""
+    target.markdown(
+        f"""
+        <div class="hb-topbar">
+            <span class="hb-crumb">Household</span>
+            {icon("chevron", 16, "color-mix(in srgb, var(--color-text) 40%, transparent)")}
+            <span class="hb-crumb-current">{esc(current_view_label)}</span>
+            <span class="hb-topbar-spacer"></span>
+            <span class="hb-tag hb-tag-accent-2">{icon("check", 14)}{doc_count} docs grounded</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1044,13 +1079,25 @@ def render_profile_tab() -> None:
     if not st.session_state.households:
         st.info("No household is attached to this account yet.")
      
-def render_docs_tab() -> None:
+@st.fragment
+def render_docs_tab(grounding_placeholder=None, topbar_placeholder=None) -> None:
     is_indexing = st.session_state.get("document_indexing", False)
+    if is_indexing:
+        render_document_indexing_overlay()
+
     try:
         entries = load_saved_documents()
     except Exception as exc:
         st.error(f"Could not load saved documents: {exc}")
         entries = []
+
+    # Fragment reruns intentionally leave the app shell in place. Refresh its
+    # two document-count summaries through replaceable placeholders so they do
+    # not become stale when indexing finishes.
+    if grounding_placeholder is not None:
+        render_grounding_summary(grounding_placeholder, len(entries))
+    if topbar_placeholder is not None:
+        render_topbar(topbar_placeholder, "Save Docs", len(entries))
 
     if st.session_state.docs_status:
         status_level = st.session_state.docs_status_level
@@ -1165,7 +1212,7 @@ def render_docs_tab() -> None:
                         st.session_state.pending_document_delete_label = entry["display_name"]
                         st.session_state.docs_status = None
                         st.session_state.docs_status_level = None
-                        st.rerun()
+                        st.rerun(scope="fragment")
         else:
             st.markdown(
                 """
@@ -1201,11 +1248,11 @@ def render_docs_tab() -> None:
                     ]
                     st.session_state.pending_document_delete_entry_id = None
                     st.session_state.pending_document_delete_label = None
-                    st.rerun()
+                    st.rerun(scope="fragment")
                 except Exception as exc:
                     st.session_state.docs_status = f"Error deleting document: {exc}"
                     st.session_state.docs_status_level = "error"
-                    st.rerun()
+                    st.rerun(scope="fragment")
 
             if cancel_col.button(
                 "Cancel",
@@ -1215,7 +1262,7 @@ def render_docs_tab() -> None:
             ):
                 st.session_state.pending_document_delete_entry_id = None
                 st.session_state.pending_document_delete_label = None
-                st.rerun()
+                st.rerun(scope="fragment")
 
         if entries and st.button(
             "Clear All Saved Docs",
@@ -1226,7 +1273,7 @@ def render_docs_tab() -> None:
             st.session_state.confirm_clear_all_docs = True
             st.session_state.docs_status = None
             st.session_state.docs_status_level = None
-            st.rerun()
+            st.rerun(scope="fragment")
 
         if st.session_state.confirm_clear_all_docs:
             st.error(
@@ -1246,11 +1293,11 @@ def render_docs_tab() -> None:
                     st.session_state.docs_status_level = "success"
                     st.session_state.confirm_clear_all_docs = False
                     st.session_state.indexed_docs = []
-                    st.rerun()
+                    st.rerun(scope="fragment")
                 except Exception as exc:
                     st.session_state.docs_status = f"Error deleting documents: {exc}"
                     st.session_state.docs_status_level = "error"
-                    st.rerun()
+                    st.rerun(scope="fragment")
 
             if clear_cancel_col.button(
                 "Keep Documents",
@@ -1259,7 +1306,7 @@ def render_docs_tab() -> None:
                 disabled=is_indexing,
             ):
                 st.session_state.confirm_clear_all_docs = False
-                st.rerun()
+                st.rerun(scope="fragment")
 
     with right_col:
         # A keyed container carries the panel styling. An unmatched open/close
@@ -1324,7 +1371,7 @@ def render_docs_tab() -> None:
                     "doc_type": url_doc_type,
                 }
             )
-            st.rerun()
+            st.rerun(scope="fragment")
 
     if upload_document:
         if uploaded_file is None:
@@ -1343,7 +1390,7 @@ def render_docs_tab() -> None:
                     "content_type": uploaded_file.type or "application/pdf",
                 }
             )
-            st.rerun()
+            st.rerun(scope="fragment")
 
     if is_indexing:
         finish_pending_document_index()
@@ -2993,7 +3040,6 @@ st.markdown("""
         .st-key-hb_rail .hb-rail-label,
         .st-key-hb_rail > .stElementContainer:has(.hb-ground-card),
         .st-key-hb_rail > .stElementContainer:has(.hb-account-chip),
-        .st-key-hb_rail > .st-key-rail_manage_docs,
         .st-key-hb_rail > .st-key-rail_sign_out {
             margin-top: 1rem;
             display: none !important;
@@ -3458,10 +3504,6 @@ try:
 except Exception:
     grounded_docs = []
 doc_count = len(grounded_docs)
-doc_noun = "document" if doc_count == 1 else "documents"
-
-if st.session_state.document_indexing:
-    render_document_indexing_overlay()
 
 nav_col, content_col = st.columns(
     [0.95, 3.55],
@@ -3497,28 +3539,8 @@ with nav_col:
                 st.session_state.active_view = view_key
                 st.rerun()
 
-        grounding_copy = (
-            f"{doc_count} {doc_noun} indexed and ready to cite."
-            if doc_count
-            else "No documents indexed yet — add one to ground answers."
-        )
-        st.markdown(
-            f"""
-            <div class="hb-ground-card">
-                <div class="hb-ground-kicker">Grounding</div>
-                <div class="hb-ground-body">{esc(grounding_copy)}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        if st.button(
-            "Manage docs",
-            key="rail_manage_docs",
-            use_container_width=True,
-            disabled=st.session_state.document_indexing,
-        ):
-            st.session_state.active_view = "docs"
-            st.rerun()
+        grounding_placeholder = st.empty()
+        render_grounding_summary(grounding_placeholder, doc_count)
 
         st.markdown(
             f"""
@@ -3540,20 +3562,14 @@ with nav_col:
 
 with content_col:
     with st.container(key="hb_shell"):
-        st.markdown(
-            f"""
-            <div class="hb-topbar">
-                <span class="hb-crumb">Household</span>
-                {icon("chevron", 16, "color-mix(in srgb, var(--color-text) 40%, transparent)")}
-                <span class="hb-crumb-current">{esc(nav_options[st.session_state.active_view])}</span>
-                <span class="hb-topbar-spacer"></span>
-                <span class="hb-tag hb-tag-accent-2">{icon("check", 14)}{doc_count} docs grounded</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        topbar_placeholder = st.empty()
+        render_topbar(
+            topbar_placeholder,
+            nav_options[st.session_state.active_view],
+            doc_count,
         )
         if st.session_state.active_view == "docs":
-            render_docs_tab()
+            render_docs_tab(grounding_placeholder, topbar_placeholder)
         elif st.session_state.active_view == "chat":
             render_chat_tab()
         elif st.session_state.active_view == "cases" and HOME_OPERATIONS_ENABLED:
