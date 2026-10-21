@@ -1,3 +1,4 @@
+import asyncio
 import html
 import json
 import os
@@ -10,7 +11,13 @@ import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
-from frontend_auth import claim_auth_code, jwt_is_expired
+from frontend_auth import (
+    access_token_needs_renewal,
+    claim_auth_code,
+    jwt_is_expired,
+    store_renewed_tokens,
+)
+from frontend_requests import RequestAbandoned, post_while_active
 
 load_dotenv()
 
@@ -27,7 +34,15 @@ COGNITO_ALLOWED_GROUPS = tuple(
     item.strip() for item in os.getenv("COGNITO_ALLOWED_GROUPS", "").split(",") if item.strip()
 )
 LANGCHAIN_TRACING = os.getenv("LANGCHAIN_TRACING_V2", "true")
+# Redacting and embedding a long manual can take a few minutes on the beta
+# host. Past this the request is dropped, and the backend discards the upload.
+DOCUMENT_INDEX_TIMEOUT_MINUTES = 5
 BETA_ACCESS_ERROR = "This account is not enabled for the HomeBuddy beta."
+SESSION_EXPIRED_MESSAGE = "Your session expired. Please sign in again."
+# Renew the access token this long before it expires. It absorbs clock drift
+# between this host and Cognito, and stays well under Cognito's 5-minute
+# minimum token lifetime so a short-lived token is not renewed on every request.
+ACCESS_TOKEN_RENEWAL_LEEWAY_SECONDS = 120
 
 
 class BackendRequestError(RuntimeError):
@@ -127,14 +142,41 @@ def _format_auth_error(exc: Exception) -> str:
 
 def _format_session_restore_error(exc: Exception) -> str:
     message = str(exc).strip()
-    if not message:
-        return "Your session expired. Please sign in again."
     if message == BETA_ACCESS_ERROR:
         return message
+    # A 401 detail is a token-validation internal ("JWT decode failed.") that
+    # tells the user nothing beyond "sign in again".
+    if not message or getattr(exc, "status_code", None) == 401:
+        return SESSION_EXPIRED_MESSAGE
     return f"Your session expired or could not be restored: {message}"
 
 
+def renew_access_token_if_expiring() -> None:
+    """Swap a nearly expired access token using the refresh token held in session memory."""
+    if not access_token_needs_renewal(
+        st.session_state, leeway=ACCESS_TOKEN_RENEWAL_LEEWAY_SECONDS
+    ):
+        return
+    try:
+        # Not post_json: it builds its headers by calling this function.
+        response = get_api_client().post(
+            "/auth/refresh", json={"refresh_token": st.session_state.refresh_token}
+        )
+    except httpx.HTTPError:
+        # The backend is unreachable; the request that follows reports it.
+        return
+    if response.status_code == 401:
+        # Cognito refused the refresh token (expired or revoked). Stop trying;
+        # the next request's 401 sends the user back to sign in.
+        st.session_state.refresh_token = None
+        return
+    if response.is_error:
+        return
+    store_renewed_tokens(st.session_state, response.json())
+
+
 def _request_headers() -> dict[str, str]:
+    renew_access_token_if_expiring()
     # Attach the bearer token only when the app is operating in authenticated mode.
     token = st.session_state.get("auth_token")
     if token:
@@ -146,7 +188,10 @@ def sync_browser_auth_storage(
     action: str,
     access_token: str | None = None,
 ) -> dict | None:
-    """Read, write, or clear the browser-persisted Cognito access token."""
+    """Read, write, or clear the browser-persisted Cognito access token.
+
+    "sync" writes a renewed token without replying, so it never causes a rerun.
+    """
     return AUTH_STORAGE_COMPONENT(
         action=action,
         access_token=access_token,
@@ -193,8 +238,15 @@ def delete_request(path: str) -> None:
         raise RuntimeError(_read_backend_error(response))
 
 
-def post_form(path: str, data: dict, files: dict | None = None) -> dict:
-    response = get_api_client().post(path, data=data, files=files, headers=_request_headers())
+def post_form_while_active(path: str, data: dict, files: dict | None, timeout: float) -> dict:
+    """POST a form, dropping the request if this browser tab refreshes or closes."""
+    headers = _request_headers()
+
+    async def send() -> httpx.Response:
+        async with httpx.AsyncClient(base_url=BACKEND_URL, timeout=timeout) as client:
+            return await post_while_active(client, path, data=data, files=files, headers=headers)
+
+    response = asyncio.run(send())
     if response.is_error:
         raise RuntimeError(_read_backend_error(response))
     return response.json()
@@ -357,7 +409,7 @@ def exchange_auth_code(code: str) -> dict:
     return post_json("/auth/exchange", {"code": code})
 
 
-def build_cognito_authorize_url() -> str | None:
+def build_cognito_sign_in_url() -> str | None:
     if not COGNITO_DOMAIN or not COGNITO_APP_CLIENT_ID or not COGNITO_REDIRECT_URI:
         return None
     query = urlencode(
@@ -369,7 +421,12 @@ def build_cognito_authorize_url() -> str | None:
             "prompt": "login",
         }
     )
-    return f"{COGNITO_DOMAIN.rstrip('/')}/oauth2/authorize?{query}"
+    # Link straight to /login, which takes the same parameters and is where
+    # /oauth2/authorize redirects anyway. Cognito's authorize endpoint returns
+    # a 500 when the browser's Accept-Language header lists more than 10
+    # languages (Chrome sends every language in the user's settings), and
+    # /login does not. Go back to /oauth2/authorize once AWS fixes that.
+    return f"{COGNITO_DOMAIN.rstrip('/')}/login?{query}"
 
 
 def build_cognito_logout_url() -> str | None:
@@ -418,6 +475,10 @@ def handle_cognito_callback() -> None:
         st.session_state.auth_token = token_payload["access_token"]
         st.session_state.access_token = token_payload["access_token"]
         st.session_state.id_token = token_payload["id_token"]
+        # Server-side session memory only; never sent to the browser. A page
+        # refresh starts a new session without it, so that session ends when
+        # its restored access token expires.
+        st.session_state.refresh_token = token_payload.get("refresh_token")
         st.session_state.current_user = bootstrap_auth_identity(
             st.session_state.id_token,
             st.session_state.access_token,
@@ -431,6 +492,7 @@ def handle_cognito_callback() -> None:
         st.session_state.auth_token = None
         st.session_state.access_token = None
         st.session_state.id_token = None
+        st.session_state.refresh_token = None
         st.session_state.current_user = None
         st.session_state.auth_error = _format_auth_error(exc)
         st.rerun()
@@ -442,6 +504,7 @@ def sign_out() -> bool:
     st.session_state.access_token = None
     st.session_state.auth_token = None
     st.session_state.id_token = None
+    st.session_state.refresh_token = None
     st.session_state.current_user = None
     st.session_state.active_household_id = None
     st.session_state.active_household_zip = None
@@ -493,10 +556,10 @@ def render_sign_in_screen() -> None:
             if st.session_state.get("auth_error"):
                 st.error(st.session_state.auth_error)
 
-            authorize_url = build_cognito_authorize_url()
-            if authorize_url:
+            sign_in_url = build_cognito_sign_in_url()
+            if sign_in_url:
                 st.markdown(
-                    f'<a class="hb-signin-btn" href="{esc(authorize_url)}" target="_self">Sign In</a>',
+                    f'<a class="hb-signin-btn" href="{esc(sign_in_url)}" target="_self">Sign In</a>',
                     unsafe_allow_html=True,
                 )
                 st.markdown(
@@ -917,7 +980,12 @@ def finish_pending_document_index() -> None:
                 )
             }
 
-        result = post_form("/documents/index", data=data, files=files)
+        result = post_form_while_active(
+            "/documents/index",
+            data=data,
+            files=files,
+            timeout=DOCUMENT_INDEX_TIMEOUT_MINUTES * 60,
+        )
         remember_indexed_doc(
             display_name=pending_document["display_name"],
             entry_id=pending_document["entry_id"],
@@ -928,6 +996,18 @@ def finish_pending_document_index() -> None:
             f"{result['chunks_indexed']} chunks."
         )
         st.session_state.docs_status_level = "success"
+    except RequestAbandoned:
+        # The tab refreshed or closed mid-upload, and the backend discards the
+        # document once the connection drops. A refreshed tab starts a new
+        # session and never sees this; it only shows after a brief reconnect.
+        st.session_state.docs_status = "The upload was interrupted, so nothing was saved. Try again."
+        st.session_state.docs_status_level = "error"
+    except httpx.TimeoutException:
+        st.session_state.docs_status = (
+            f"Could not save document: indexing took longer than {DOCUMENT_INDEX_TIMEOUT_MINUTES} "
+            "minutes, so it was cancelled and nothing was saved. Try again."
+        )
+        st.session_state.docs_status_level = "error"
     except Exception as exc:
         st.session_state.docs_status = f"Could not save document: {exc}"
         st.session_state.docs_status_level = "error"
@@ -1079,6 +1159,73 @@ def render_profile_tab() -> None:
     if not st.session_state.households:
         st.info("No household is attached to this account yet.")
      
+# Confirmation dialogs. Closing one takes a full-app rerun (st.rerun()); a
+# fragment-scoped rerun would only redraw the dialog and leave it open.
+@st.dialog("Delete document?")
+def confirm_document_delete(entry_id: str, display_name: str) -> None:
+    st.markdown(
+        f"""
+        <p class="hb-dialog-copy">
+            <strong>{esc(display_name)}</strong> will be removed from your library,
+            and Home Buddy will stop using it in answers. This can't be undone.
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
+    cancel_col, confirm_col = st.columns(2)
+    if cancel_col.button("Cancel", key="cancel_delete_single_document", use_container_width=True):
+        st.rerun()
+    if confirm_col.button(
+        "Delete",
+        key="confirm_delete_single_document",
+        type="primary",
+        use_container_width=True,
+    ):
+        try:
+            delete_single_document(entry_id)
+        except Exception as exc:
+            st.error(f"Could not delete document: {exc}")
+            return
+        st.session_state.docs_status = "Document deleted."
+        st.session_state.docs_status_level = "success"
+        st.session_state.indexed_docs = [
+            doc for doc in st.session_state.indexed_docs if doc["entry_id"] != entry_id
+        ]
+        st.rerun()
+
+
+@st.dialog("Clear all saved docs?")
+def confirm_clear_all_documents(document_count: int) -> None:
+    doc_noun = "document" if document_count == 1 else "documents"
+    st.markdown(
+        f"""
+        <p class="hb-dialog-copy">
+            All {document_count} {doc_noun} will be removed from this household's library,
+            and Home Buddy will stop using them in answers. This can't be undone.
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
+    cancel_col, confirm_col = st.columns(2)
+    if cancel_col.button("Keep documents", key="cancel_clear_all_docs_button", use_container_width=True):
+        st.rerun()
+    if confirm_col.button(
+        "Clear all",
+        key="confirm_clear_all_docs_button",
+        type="primary",
+        use_container_width=True,
+    ):
+        try:
+            delete_all_documents()
+        except Exception as exc:
+            st.error(f"Could not delete documents: {exc}")
+            return
+        st.session_state.docs_status = "All saved documents deleted."
+        st.session_state.docs_status_level = "success"
+        st.session_state.indexed_docs = []
+        st.rerun()
+
+
 @st.fragment
 def render_docs_tab(grounding_placeholder=None, topbar_placeholder=None) -> None:
     is_indexing = st.session_state.get("document_indexing", False)
@@ -1179,6 +1326,7 @@ def render_docs_tab(grounding_placeholder=None, topbar_placeholder=None) -> None
         st.markdown('<div class="hb-stack-gap"></div>', unsafe_allow_html=True)
         st.markdown('<div class="hb-section-label">Document Library</div>', unsafe_allow_html=True)
 
+        delete_requested_for = None
         if saved_doc_labels:
             for entry in entries:
                 doc_col, action_col = st.columns([4.4, 1.1], gap="small")
@@ -1206,13 +1354,7 @@ def render_docs_tab(grounding_placeholder=None, topbar_placeholder=None) -> None
                         use_container_width=True,
                         disabled=is_indexing,
                     ):
-                        # Store raw values: esc() is display-only, and the entry_id here is
-                        # sent back to the delete endpoint, which must match the DB exactly.
-                        st.session_state.pending_document_delete_entry_id = entry["entry_id"]
-                        st.session_state.pending_document_delete_label = entry["display_name"]
-                        st.session_state.docs_status = None
-                        st.session_state.docs_status_level = None
-                        st.rerun(scope="fragment")
+                        delete_requested_for = entry
         else:
             st.markdown(
                 """
@@ -1224,89 +1366,24 @@ def render_docs_tab(grounding_placeholder=None, topbar_placeholder=None) -> None
                 unsafe_allow_html=True,
             )
 
-        if st.session_state.pending_document_delete_entry_id:
-            st.warning(
-                f"Delete saved document '{st.session_state.pending_document_delete_label}'? "
-                "This will remove both the document metadata and its indexed chunks."
-            )
-            confirm_col, cancel_col = st.columns(2)
-            if confirm_col.button(
-                "Confirm Delete Document",
-                key="confirm_delete_single_document",
-                use_container_width=True,
-                disabled=is_indexing,
-            ):
-                try:
-                    deleted_entry_id = st.session_state.pending_document_delete_entry_id
-                    delete_single_document(deleted_entry_id)
-                    st.session_state.docs_status = "Document deleted."
-                    st.session_state.docs_status_level = "success"
-                    st.session_state.indexed_docs = [
-                        doc
-                        for doc in st.session_state.indexed_docs
-                        if doc["entry_id"] != deleted_entry_id
-                    ]
-                    st.session_state.pending_document_delete_entry_id = None
-                    st.session_state.pending_document_delete_label = None
-                    st.rerun(scope="fragment")
-                except Exception as exc:
-                    st.session_state.docs_status = f"Error deleting document: {exc}"
-                    st.session_state.docs_status_level = "error"
-                    st.rerun(scope="fragment")
-
-            if cancel_col.button(
-                "Cancel",
-                key="cancel_delete_single_document",
-                use_container_width=True,
-                disabled=is_indexing,
-            ):
-                st.session_state.pending_document_delete_entry_id = None
-                st.session_state.pending_document_delete_label = None
-                st.rerun(scope="fragment")
-
         if entries and st.button(
             "Clear All Saved Docs",
             key="prompt_clear_all_docs",
             use_container_width=True,
             disabled=is_indexing,
         ):
-            st.session_state.confirm_clear_all_docs = True
             st.session_state.docs_status = None
             st.session_state.docs_status_level = None
-            st.rerun(scope="fragment")
+            confirm_clear_all_documents(len(entries))
 
-        if st.session_state.confirm_clear_all_docs:
-            st.error(
-                "This will remove every saved document for the active household, along with all indexed chunks. "
-                "Click confirm only if you want to permanently clear the document library."
+        if delete_requested_for is not None:
+            st.session_state.docs_status = None
+            st.session_state.docs_status_level = None
+            # Pass raw values: esc() is display-only, and the entry_id is sent
+            # back to the delete endpoint, which must match the DB exactly.
+            confirm_document_delete(
+                delete_requested_for["entry_id"], delete_requested_for["display_name"]
             )
-            clear_confirm_col, clear_cancel_col = st.columns(2)
-            if clear_confirm_col.button(
-                "Confirm Clear All Docs",
-                key="confirm_clear_all_docs_button",
-                use_container_width=True,
-                disabled=is_indexing,
-            ):
-                try:
-                    delete_all_documents()
-                    st.session_state.docs_status = "All saved documents deleted."
-                    st.session_state.docs_status_level = "success"
-                    st.session_state.confirm_clear_all_docs = False
-                    st.session_state.indexed_docs = []
-                    st.rerun(scope="fragment")
-                except Exception as exc:
-                    st.session_state.docs_status = f"Error deleting documents: {exc}"
-                    st.session_state.docs_status_level = "error"
-                    st.rerun(scope="fragment")
-
-            if clear_cancel_col.button(
-                "Keep Documents",
-                key="cancel_clear_all_docs_button",
-                use_container_width=True,
-                disabled=is_indexing,
-            ):
-                st.session_state.confirm_clear_all_docs = False
-                st.rerun(scope="fragment")
 
     with right_col:
         # A keyed container carries the panel styling. An unmatched open/close
@@ -2931,17 +3008,33 @@ st.markdown("""
         border-radius: 22px !important;
     }
 
+    /* Fields show focus as an accent border on the pill itself. An outline
+       would also wrap the dropdown's 2px-wide search input and show up as a
+       stray orange box beside the selected value. */
     .stTextInput input:focus,
-    .stTextArea textarea:focus {
+    .stTextArea textarea:focus,
+    .stDateInput input:focus,
+    .stSelectbox [data-baseweb="select"] > div:focus-within {
         border-color: var(--color-accent) !important;
         box-shadow: none !important;
     }
 
+    .stTextInput input,
+    .stTextArea textarea,
+    .stDateInput input,
+    .stSelectbox input {
+        outline: none !important;
+    }
+
+    /* Streamlit's "Press Enter to submit form" hint overlaps typed text in
+       narrow fields. Every form has a visible submit button, and Enter still
+       submits. */
+    [data-testid="InputInstructions"] {
+        display: none !important;
+    }
+
     button:focus-visible,
-    a:focus-visible,
-    input:focus-visible,
-    textarea:focus-visible,
-    [role="combobox"]:focus-visible {
+    a:focus-visible {
         outline: 2px solid var(--color-accent) !important;
         outline-offset: 2px !important;
     }
@@ -3252,6 +3345,29 @@ st.markdown("""
         line-height: 1.5;
     }
 
+    /* Confirmation dialogs (st.dialog) share the indexing modal's look. */
+    [data-testid="stDialog"] > div:has(> [role="dialog"]) {
+        background: color-mix(in srgb, var(--color-neutral-900) 48%, transparent);
+        backdrop-filter: grayscale(1) blur(2px);
+    }
+    [data-testid="stDialog"] [role="dialog"] {
+        border: 1px solid var(--color-divider);
+        border-radius: var(--radius-lg);
+        background: var(--color-neutral-100);
+        box-shadow: var(--shadow-lg);
+    }
+    /* The title row carries inline font styles, so these need !important. */
+    [data-testid="stDialog"] [role="dialog"] > div:first-child {
+        font-family: var(--font-heading) !important;
+        font-size: 1.65rem !important;
+        font-weight: 400 !important;
+    }
+    .hb-dialog-copy {
+        margin: 0 0 0.75rem;
+        font-size: 0.95rem;
+        line-height: 1.55;
+    }
+
     @keyframes hb-indexing-spin {
         to { transform: rotate(360deg); }
     }
@@ -3278,12 +3394,6 @@ if "indexed_docs" not in st.session_state:
     st.session_state.indexed_docs = []
 if "active_entry_id" not in st.session_state:
     st.session_state.active_entry_id = None
-if "pending_document_delete_entry_id" not in st.session_state:
-    st.session_state.pending_document_delete_entry_id = None
-if "pending_document_delete_label" not in st.session_state:
-    st.session_state.pending_document_delete_label = None
-if "confirm_clear_all_docs" not in st.session_state:
-    st.session_state.confirm_clear_all_docs = False
 if "docs_status" not in st.session_state:
     st.session_state.docs_status = None
 if "docs_status_level" not in st.session_state:
@@ -3320,6 +3430,8 @@ if "id_token" not in st.session_state:
     st.session_state.id_token = None
 if "access_token" not in st.session_state:
     st.session_state.access_token = None
+if "refresh_token" not in st.session_state:
+    st.session_state.refresh_token = None
 if "auth_signed_in" not in st.session_state:
     st.session_state.auth_signed_in = False
 if "current_user" not in st.session_state:
@@ -3394,10 +3506,12 @@ handle_cognito_callback()
 # Handle the one-time OAuth callback before mounting the browser-storage
 # component. Its initial value can trigger a Streamlit rerun, which must never
 # interrupt an authorization-code exchange.
+# Renew first as well, so a renewed token reaches the browser in this run.
+renew_access_token_if_expiring()
 auth_storage_action = st.session_state.auth_storage_action
 auth_storage_result = sync_browser_auth_storage(
     auth_storage_action,
-    st.session_state.access_token if auth_storage_action == "write" else None,
+    st.session_state.access_token if auth_storage_action in {"write", "sync"} else None,
 )
 auth_storage_ready = bool(
     isinstance(auth_storage_result, dict)
@@ -3427,7 +3541,7 @@ if not st.session_state.auth_signed_in and not st.query_params.get("code"):
     stored_access_token = auth_storage_result.get("access_token")
     if stored_access_token:
         if jwt_is_expired(stored_access_token):
-            st.session_state.auth_error = "Your session expired. Please sign in again."
+            st.session_state.auth_error = SESSION_EXPIRED_MESSAGE
             st.session_state.auth_storage_action = "clear"
             st.rerun()
         st.session_state.auth_token = stored_access_token
@@ -3448,6 +3562,7 @@ if st.session_state.auth_signed_in:
         st.session_state.auth_token = None
         st.session_state.id_token = None
         st.session_state.access_token = None
+        st.session_state.refresh_token = None
         st.session_state.current_user = None
         st.session_state.households = []
         st.session_state.auth_error = _format_session_restore_error(exc)

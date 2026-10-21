@@ -161,6 +161,10 @@ class AuthCodeExchangeRequest(BaseModel):
     code: str
 
 
+class AuthRefreshRequest(BaseModel):
+    refresh_token: str
+
+
 class AuthCodeExchangeResponse(BaseModel):
     id_token: str
     access_token: str

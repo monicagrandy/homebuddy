@@ -31,7 +31,7 @@
         const args = event.data.args || {};
         const action = args.action || "read";
 
-        if (action === "write" && args.access_token) {
+        if ((action === "write" || action === "sync") && args.access_token) {
           window.localStorage.setItem(
             STORAGE_KEY,
             JSON.stringify({ access_token: args.access_token })
@@ -39,6 +39,10 @@
         } else if (action === "clear") {
           window.localStorage.removeItem(STORAGE_KEY);
         }
+
+        // A renewed token is stored silently. Replying with a value would
+        // rerun the app and could interrupt an upload or chat in progress.
+        if (action === "sync") return;
 
         const stored = readStoredAuth();
         post("streamlit:setComponentValue", {

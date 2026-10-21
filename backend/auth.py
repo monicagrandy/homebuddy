@@ -274,12 +274,46 @@ def exchange_auth_code_for_tokens(code: str) -> dict:
             detail="Cognito client configuration is incomplete.",
         )
 
-    form_data = {
-        "grant_type": "authorization_code",
-        "client_id": settings.cognito_app_client_id,
-        "code": code,
-        "redirect_uri": settings.cognito_redirect_uri,
-    }
+    return _request_cognito_tokens(
+        {
+            "grant_type": "authorization_code",
+            "client_id": settings.cognito_app_client_id,
+            "code": code,
+            "redirect_uri": settings.cognito_redirect_uri,
+        },
+        rejected_detail="Could not exchange Cognito authorization code.",
+    )
+
+
+def refresh_cognito_tokens(refresh_token: str) -> dict:
+    """Trade a refresh token for new ID and access tokens.
+
+    Cognito only includes a new refresh token when rotation is enabled on the
+    app client; otherwise the caller keeps using the one it has.
+    """
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing refresh token.",
+        )
+
+    if not settings.cognito_app_client_id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Cognito client configuration is incomplete.",
+        )
+
+    return _request_cognito_tokens(
+        {
+            "grant_type": "refresh_token",
+            "client_id": settings.cognito_app_client_id,
+            "refresh_token": refresh_token,
+        },
+        rejected_detail="Cognito did not accept the refresh token.",
+    )
+
+
+def _request_cognito_tokens(form_data: dict, *, rejected_detail: str) -> dict:
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
     if settings.cognito_app_client_secret:
@@ -299,9 +333,16 @@ def exchange_auth_code_for_tokens(code: str) -> dict:
     except httpx.HTTPStatusError as exc:
         detail = exc.response.text
         logger.error("Cognito token exchange failed: %s", detail)
+        # A 4xx means Cognito refused the code or refresh token, so the caller
+        # has to sign in again. A 5xx is Cognito's problem and may be retried.
+        if exc.response.status_code >= 500:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Cognito token exchange failed.",
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not exchange Cognito authorization code.",
+            detail=rejected_detail,
         ) from exc
     except (httpx.HTTPError, json.JSONDecodeError) as exc:
         logger.error("Cognito token exchange failed: %s", exc)

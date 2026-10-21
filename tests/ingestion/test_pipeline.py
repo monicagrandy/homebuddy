@@ -1,4 +1,6 @@
-from backend.ingestion.pipeline import IngestionPipeline
+import pytest
+
+from backend.ingestion.pipeline import IngestionCancelled, IngestionPipeline
 
 
 class StubLoader:
@@ -119,3 +121,49 @@ def test_ingest_upload_redacts_high_risk_personal_identifiers_but_keeps_business
     assert "Acme Home Insurance" in chunk_text
     assert "(800) 555-1212" in chunk_text
     assert "200 Market Street, Los Angeles, CA" in chunk_text
+
+
+def test_ingest_upload_stops_between_pages_once_cancelled():
+    redacted_pages: list[str] = []
+
+    class RecordingGuardrail(StubGuardrail):
+        def anonymize_input(self, text: str) -> dict:
+            redacted_pages.append(text)
+            return super().anonymize_input(text)
+
+    pipeline = IngestionPipeline(
+        loader=StubLoader(["page one", "page two", "page three"]),
+        vector_manager=StubVectorStore(),
+        safety_guardrail=RecordingGuardrail(),
+    )
+
+    with pytest.raises(IngestionCancelled):
+        pipeline.ingest_upload_from_file(
+            household_id=4,
+            entry_id="manual",
+            file_bytes=b"fake-pdf",
+            doc_type="manual",
+            should_cancel=lambda: len(redacted_pages) >= 1,
+        )
+
+    assert redacted_pages == ["page one"]
+    assert pipeline.vector_manager.calls == []
+
+
+def test_ingest_download_does_not_write_chunks_once_cancelled():
+    pipeline = IngestionPipeline(
+        loader=StubLoader(["page one"]),
+        vector_manager=StubVectorStore(),
+        safety_guardrail=StubGuardrail(),
+    )
+
+    with pytest.raises(IngestionCancelled):
+        pipeline.ingest_download_from_url(
+            household_id=4,
+            entry_id="manual",
+            url="https://example.com/manual.pdf",
+            doc_type="manual",
+            should_cancel=lambda: True,
+        )
+
+    assert pipeline.vector_manager.calls == []

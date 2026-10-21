@@ -1,3 +1,4 @@
+import threading
 from collections.abc import Generator
 
 import httpx
@@ -9,16 +10,21 @@ from sqlalchemy.orm import sessionmaker
 
 from backend import api
 from backend.auth import AuthenticatedIdentity
+from backend.ingestion.pipeline import IngestionCancelled
 from backend.db import Base
 
 
 class StubIngestionService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.discarded: list[dict] = []
 
     def index(self, **kwargs) -> dict:
         self.calls.append(kwargs)
         return {"entry_id": kwargs["entry_id"], "chunks_indexed": 2}
+
+    def discard(self, **kwargs) -> None:
+        self.discarded.append(kwargs)
 
 
 class StubQueryService:
@@ -144,6 +150,33 @@ def test_auth_me_allows_user_in_allowed_cognito_group(client: TestClient, monkey
     }
 
 
+def test_auth_refresh_returns_renewed_tokens(client: TestClient, monkeypatch):
+    refreshed_with: list[str] = []
+
+    def fake_refresh(refresh_token: str) -> dict:
+        refreshed_with.append(refresh_token)
+        return {
+            "id_token": "new-id-token",
+            "access_token": "new-access-token",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+        }
+
+    monkeypatch.setattr(api, "refresh_cognito_tokens", fake_refresh)
+
+    response = client.post("/auth/refresh", json={"refresh_token": "refresh-token"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "id_token": "new-id-token",
+        "access_token": "new-access-token",
+        "expires_in": 3600,
+        "token_type": "Bearer",
+        "refresh_token": None,
+    }
+    assert refreshed_with == ["refresh-token"]
+
+
 def test_create_and_list_households_for_authenticated_user(client: TestClient):
     created = _create_household(client)
 
@@ -220,6 +253,90 @@ def test_document_upload_is_saved_and_can_be_reindexed_without_reupload(client: 
             "uploaded_at": documents_response.json()[0]["uploaded_at"],
         }
     ]
+
+
+def _post_dishwasher_upload(client: TestClient, household_id: int):
+    return client.post(
+        "/documents/index",
+        data={
+            "household_id": str(household_id),
+            "entry_id": "dishwasher-manual",
+            "session_id": "session-1",
+            "display_name": "Dishwasher Manual",
+            "doc_type": "manual",
+        },
+        files={"file": ("manual.pdf", b"%PDF-1.4 fake", "application/pdf")},
+    )
+
+
+def _simulate_client_disconnect(monkeypatch) -> None:
+    async def disconnect_immediately(request, cancelled):
+        cancelled.set()
+
+    monkeypatch.setattr(api, "_cancel_on_disconnect", disconnect_immediately)
+
+
+def test_document_upload_cancelled_mid_index_is_not_saved(client: TestClient, monkeypatch):
+    household = _create_household(client)
+    _simulate_client_disconnect(monkeypatch)
+
+    class CancellingIngestionService(StubIngestionService):
+        def index(self, **kwargs) -> dict:
+            self.calls.append(kwargs)
+            if kwargs["should_cancel"]():
+                raise IngestionCancelled("Indexing was cancelled before the document was saved.")
+            return super().index(**kwargs)
+
+    service = CancellingIngestionService()
+    api.app.dependency_overrides[api.get_ingestion_service] = lambda: service
+
+    response = _post_dishwasher_upload(client, household["id"])
+
+    assert response.status_code == 499
+    assert client.get("/documents", params={"household_id": household["id"]}).json() == []
+
+
+def test_document_upload_discards_chunks_when_client_leaves_after_indexing(
+    client: TestClient, monkeypatch
+):
+    household = _create_household(client)
+    _simulate_client_disconnect(monkeypatch)
+    service = StubIngestionService()
+    api.app.dependency_overrides[api.get_ingestion_service] = lambda: service
+
+    response = _post_dishwasher_upload(client, household["id"])
+
+    assert response.status_code == 499
+    assert service.discarded == [
+        {"household_id": household["id"], "entry_id": "dishwasher-manual"}
+    ]
+    assert client.get("/documents", params={"household_id": household["id"]}).json() == []
+
+
+def test_documents_list_responds_while_an_upload_is_indexing(client: TestClient):
+    household = _create_household(client)
+    list_status: list[int] = []
+
+    class ListingIngestionService(StubIngestionService):
+        def index(self, **kwargs) -> dict:
+            # If indexing ran on the event loop, this request could not be served
+            # until indexing finished, so the bounded wait below would expire.
+            lister = threading.Thread(
+                target=lambda: list_status.append(
+                    client.get("/documents", params={"household_id": household["id"]}).status_code
+                ),
+                daemon=True,
+            )
+            lister.start()
+            lister.join(timeout=5)
+            return super().index(**kwargs)
+
+    api.app.dependency_overrides[api.get_ingestion_service] = lambda: ListingIngestionService()
+
+    response = _post_dishwasher_upload(client, household["id"])
+
+    assert response.status_code == 200
+    assert list_status == [200]
 
 
 def test_query_persists_sanitized_messages_to_conversation_history(client: TestClient):

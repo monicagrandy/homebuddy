@@ -1,6 +1,7 @@
 import pytest
 
 from backend.ingestion.loader import DocumentLoadError
+from backend.ingestion.pipeline import IngestionCancelled
 from backend.services.ingestion_service import IngestionError, IngestionService
 
 
@@ -8,11 +9,11 @@ class StubPipeline:
     def __init__(self):
         self.calls = []
 
-    def ingest_download_from_url(self, household_id: int, entry_id: str, url: str, session_id: str, doc_type: str):
+    def ingest_download_from_url(self, household_id: int, entry_id: str, url: str, session_id: str, doc_type: str, should_cancel=None):
         self.calls.append((household_id, entry_id, url, session_id, doc_type))
         return {"entry_id": entry_id, "chunks_indexed": 3}
 
-    def ingest_upload_from_file(self, household_id: int, entry_id: str, file_bytes: bytes, session_id: str, doc_type: str):
+    def ingest_upload_from_file(self, household_id: int, entry_id: str, file_bytes: bytes, session_id: str, doc_type: str, should_cancel=None):
         self.calls.append((household_id, entry_id, file_bytes, session_id, doc_type))
         return {"entry_id": entry_id, "chunks_indexed": 2}
 
@@ -77,7 +78,7 @@ def test_index_routes_upload_requests_to_pipeline():
 
 def test_index_reraises_document_load_errors():
     class FailingPipeline:
-        def ingest_download_from_url(self, household_id: int, entry_id: str, url: str, session_id: str, doc_type: str):
+        def ingest_download_from_url(self, household_id: int, entry_id: str, url: str, session_id: str, doc_type: str, should_cancel=None):
             raise DocumentLoadError("bad pdf")
 
     service = IngestionService(vector_manager=object(), pipeline=FailingPipeline())
@@ -94,7 +95,7 @@ def test_index_reraises_document_load_errors():
 
 def test_index_wraps_unexpected_pipeline_errors():
     class FailingPipeline:
-        def ingest_upload_from_file(self, entry_id: str, file_bytes: bytes, session_id: str, doc_type: str):
+        def ingest_upload_from_file(self, entry_id: str, file_bytes: bytes, session_id: str, doc_type: str, should_cancel=None):
             raise RuntimeError("boom")
 
     service = IngestionService(vector_manager=object(), pipeline=FailingPipeline())
@@ -107,3 +108,39 @@ def test_index_wraps_unexpected_pipeline_errors():
             file_bytes=b"fake-pdf-bytes",
             doc_type="manual",
         )
+
+
+def test_index_passes_cancellation_through_without_wrapping():
+    class CancellingPipeline:
+        def ingest_upload_from_file(self, household_id, entry_id, file_bytes, doc_type, session_id, should_cancel=None):
+            assert should_cancel() is True
+            raise IngestionCancelled("cancelled")
+
+    service = IngestionService(vector_manager=object(), pipeline=CancellingPipeline())
+
+    with pytest.raises(IngestionCancelled):
+        service.index(
+            household_id=1,
+            entry_id="manual-2",
+            session_id="session-2",
+            file_bytes=b"fake-pdf-bytes",
+            doc_type="manual",
+            should_cancel=lambda: True,
+        )
+
+
+def test_discard_deletes_the_entry_chunks():
+    class RecordingVectorStore:
+        def __init__(self):
+            self.deleted = []
+
+        def delete_entry(self, **kwargs):
+            self.deleted.append(kwargs)
+            return 3
+
+    vector_store = RecordingVectorStore()
+    service = IngestionService(vector_manager=vector_store, pipeline=StubPipeline())
+
+    service.discard(household_id=1, entry_id="manual-2")
+
+    assert vector_store.deleted == [{"household_id": 1, "entry_id": "manual-2"}]

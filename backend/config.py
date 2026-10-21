@@ -48,12 +48,12 @@ def _csv_env(name: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
 
 class Settings:
-    openai_model = os.getenv("OPENAI_MODEL", "gpt-4o")
-    workflow_openai_model = os.getenv("OPENAI_WORKFLOW_MODEL", "gpt-4o-mini")
+    openai_model = os.getenv("OPENAI_MODEL", "gpt-6-luna")
+    workflow_openai_model = os.getenv("OPENAI_WORKFLOW_MODEL", "gpt-6-sol")
     testing_openai_model = (
         os.getenv("OPENAI_TESTING_MODEL")
         or os.getenv("TESTING_OPENAI_MODEL")
-        or "gpt-4o-mini"
+        or "gpt-6-sol"
     )
     moderation_model = os.getenv("OPENAI_MODERATION_MODEL", "omni-moderation-latest")
     openai_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY", "")
@@ -81,6 +81,7 @@ class Settings:
     contractor_suggestion_limit = _int_env("CONTRACTOR_SUGGESTION_LIMIT", 3)
     contractor_search_monthly_limit = _int_env("CONTRACTOR_SEARCH_MONTHLY_LIMIT", 10)
     openai_max_retries = _int_env("OPENAI_MAX_RETRIES", 2)
+    reasoning_effort = "none"
 
     def _build_chat_model(self, *, model: str, temperature: float) -> ChatOpenAI:
         return ChatOpenAI(
@@ -88,6 +89,7 @@ class Settings:
             temperature=temperature,
             api_key=self.openai_key,
             max_retries=self.openai_max_retries,
+            reasoning_effort=self.reasoning_effort
         )
 
     @cached_property

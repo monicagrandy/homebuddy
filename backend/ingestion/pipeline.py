@@ -1,9 +1,20 @@
+from collections.abc import Callable
+
 from backend.config import get_logger
 from backend.guardrails.guardrails import SafetyGuardrail
 from backend.ingestion.loader import DocumentLoadError, PDFDocumentLoader
 from rag.vector_store import VectorStore
 
 logger = get_logger(__name__)
+
+
+class IngestionCancelled(Exception):
+    """Raised when the caller abandons an indexing run before it is saved."""
+
+
+def _raise_if_cancelled(should_cancel: Callable[[], bool] | None) -> None:
+    if should_cancel is not None and should_cancel():
+        raise IngestionCancelled("Indexing was cancelled before the document was saved.")
 
 
 class IngestionPipeline:
@@ -21,9 +32,16 @@ class IngestionPipeline:
         self.chunk_size = chunk_size
         self.overlap = overlap
 
-    def sanitize_pages(self, pages: list[str]) -> list[str]:
+    def sanitize_pages(
+        self,
+        pages: list[str],
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> list[str]:
         sanitized_pages: list[str] = []
         for page_text in pages:
+            # PII redaction runs per page and dominates indexing time on long
+            # manuals, so this is where an abandoned upload can stop early.
+            _raise_if_cancelled(should_cancel)
             sanitized_pages.append(
                 self.safety_guardrail.anonymize_input(page_text or "").get("text", page_text or "")
             )
@@ -68,9 +86,13 @@ class IngestionPipeline:
         file_bytes: bytes,
         doc_type: str,
         session_id: str = "default",
+        should_cancel: Callable[[], bool] | None = None,
     ) -> dict:
         try:
-            pages = self.sanitize_pages(self.loader.load_pages_from_upload(file_bytes))
+            pages = self.sanitize_pages(
+                self.loader.load_pages_from_upload(file_bytes),
+                should_cancel=should_cancel,
+            )
             chunks = []
             for page_idx, page_text in enumerate(pages):
                 for chunk in self.recursive_split(page_text, max_size=self.chunk_size):
@@ -83,6 +105,7 @@ class IngestionPipeline:
                         }
                     )
 
+            _raise_if_cancelled(should_cancel)
             return self.vector_manager.upsert_chunks(
                 household_id=household_id,
                 entry_id=entry_id,
@@ -92,6 +115,9 @@ class IngestionPipeline:
             )
         except DocumentLoadError as exc:
             logger.error("Document failed to load for entry %r: %s", entry_id, exc)
+            raise
+        except IngestionCancelled:
+            logger.info("Indexing cancelled for entry %r", entry_id)
             raise
         except Exception as exc:
             logger.error("Indexing pipeline failed for entry %r: %s", entry_id, exc)
@@ -103,10 +129,14 @@ class IngestionPipeline:
         entry_id: str,
         url: str,
         doc_type: str,
-        session_id: str = "default",  
+        session_id: str = "default",
+        should_cancel: Callable[[], bool] | None = None,
     ) -> dict:
         try:
-            pages = self.sanitize_pages(self.loader.load_pages_from_url(url))
+            pages = self.sanitize_pages(
+                self.loader.load_pages_from_url(url),
+                should_cancel=should_cancel,
+            )
             if not pages:
                 raise DocumentLoadError("No text content could be extracted from this PDF.")
 
@@ -122,6 +152,7 @@ class IngestionPipeline:
                         }
                     )
 
+            _raise_if_cancelled(should_cancel)
             return self.vector_manager.upsert_chunks(
                 household_id=household_id,
                 entry_id=entry_id,
@@ -131,6 +162,9 @@ class IngestionPipeline:
             )
         except DocumentLoadError as exc:
             logger.error("Document failed to load for entry %r: %s", entry_id, exc)
+            raise
+        except IngestionCancelled:
+            logger.info("Indexing cancelled for entry %r", entry_id)
             raise
         except Exception as exc:
             logger.error("Indexing pipeline failed for entry %r: %s", entry_id, exc)

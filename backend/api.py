@@ -1,9 +1,12 @@
+import asyncio
 import json
 import secrets
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, time
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage
@@ -18,6 +21,7 @@ from backend.auth import (
     ensure_cognito_beta_access,
     exchange_auth_code_for_tokens,
     get_current_identity,
+    refresh_cognito_tokens,
     validate_cognito_id_token,
 )
 from backend.config import get_logger, settings
@@ -30,6 +34,7 @@ from backend.dependencies import (
 )
 from backend.guardrails.guardrails import SafetyBlockError
 from backend.ingestion.loader import DocumentLoadError
+from backend.ingestion.pipeline import IngestionCancelled
 from backend.models import (
     Asset,
     Case,
@@ -45,6 +50,7 @@ from backend.schemas import (
     AuthBootstrapRequest,
     AuthCodeExchangeRequest,
     AuthCodeExchangeResponse,
+    AuthRefreshRequest,
     AssetCreate,
     AssetOut,
     CaseCreate,
@@ -73,6 +79,9 @@ logger = get_logger(__name__)
 _TEMPORARY_LLM_OVERLOAD_MESSAGE = (
     "HomeBuddy is temporarily busy handling AI requests. Please try again in a few seconds."
 )
+_DISCONNECT_POLL_SECONDS = 0.5
+# nginx's "client closed request" code; the caller is gone, so it is only seen in logs.
+_CLIENT_CLOSED_REQUEST = 499
 
 
 def _raise_query_http_error(exc: Exception) -> None:
@@ -376,6 +385,11 @@ def auth_bootstrap(
 @app.post("/auth/exchange", response_model=AuthCodeExchangeResponse)
 def exchange_auth_code(payload: AuthCodeExchangeRequest):
     return exchange_auth_code_for_tokens(payload.code)
+
+
+@app.post("/auth/refresh", response_model=AuthCodeExchangeResponse)
+def refresh_auth_tokens(payload: AuthRefreshRequest):
+    return refresh_cognito_tokens(payload.refresh_token)
 
 
 @app.get("/conversations/{session_id}/messages", response_model=list[ConversationMessageOut])
@@ -757,8 +771,17 @@ def delete_all_documents(
     )
 
 
+async def _cancel_on_disconnect(request: Request, cancelled: threading.Event) -> None:
+    while not cancelled.is_set():
+        if await request.is_disconnected():
+            cancelled.set()
+            return
+        await asyncio.sleep(_DISCONNECT_POLL_SECONDS)
+
+
 @app.post("/documents/index", response_model=DocumentIndexResponse)
 async def index_document(
+    request: Request,
     household_id: int = Form(...),
     entry_id: str = Form(...),
     session_id: str = Form(...),
@@ -791,14 +814,31 @@ async def index_document(
         if source_url is None and source_file_bytes is None:
             raise HTTPException(status_code=404, detail="No stored content found for this document.")
 
-        result = service.index(
-            entry_id=entry_id,
-            household_id=household_id,
-            session_id=session_id,
-            url=source_url,
-            file_bytes=source_file_bytes,
-            doc_type=doc_type,
-        )
+        # Indexing blocks for as long as PII redaction and embedding take. Run it
+        # off the event loop so other requests keep being served, and stop it if
+        # the caller hangs up (page refresh, closed tab, or client timeout).
+        cancelled = threading.Event()
+        disconnect_watcher = asyncio.create_task(_cancel_on_disconnect(request, cancelled))
+        try:
+            result = await run_in_threadpool(
+                service.index,
+                entry_id=entry_id,
+                household_id=household_id,
+                session_id=session_id,
+                url=source_url,
+                file_bytes=source_file_bytes,
+                doc_type=doc_type,
+                should_cancel=cancelled.is_set,
+            )
+        finally:
+            disconnect_watcher.cancel()
+
+        if cancelled.is_set() and document is None:
+            # The caller left after chunks were written. Drop them so a new
+            # upload is all-or-nothing. A re-index has already replaced the
+            # previous chunks, so it is saved instead of left half-done.
+            await run_in_threadpool(service.discard, household_id=household_id, entry_id=entry_id)
+            raise IngestionCancelled("Indexing was cancelled before the document was saved.")
 
         if document is None:
             document = Document(
@@ -827,6 +867,9 @@ async def index_document(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DocumentLoadError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IngestionCancelled as exc:
+        logger.info("Discarded document entry_id=%s after the client disconnected", entry_id)
+        raise HTTPException(status_code=_CLIENT_CLOSED_REQUEST, detail=str(exc)) from exc
     except IngestionError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
