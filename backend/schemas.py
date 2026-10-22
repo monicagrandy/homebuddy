@@ -193,6 +193,16 @@ class AuthCodeExchangeResponse(BaseModel):
     refresh_token: Optional[str] = None
 
 
+class ConversationOut(BaseModel):
+    """A chat thread; `id` is the session_id the client used to start it."""
+
+    id: str
+    household_id: int
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class ConversationMessageOut(BaseModel):
     id: int
     household_id: int

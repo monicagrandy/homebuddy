@@ -87,7 +87,8 @@ class DocumentJobRunner:
         """Requeue jobs left running by a crash or restart. Call once, before any worker starts."""
         with self._session_factory() as session:
             result = session.execute(
-                update(IngestionJob).where(IngestionJob.status == RUNNING).values(status=QUEUED, run_after=self._clock())
+                update(IngestionJob).where(IngestionJob.status == RUNNING).values(status=QUEUED, run_after=self._clock()),
+                execution_options={"synchronize_session": False},
             )
             session.commit()
             return result.rowcount or 0
@@ -98,7 +99,8 @@ class DocumentJobRunner:
                 delete(IngestionJob).where(
                     IngestionJob.status.in_((SUCCEEDED, FAILED)),
                     IngestionJob.finished_at < self._clock() - older_than,
-                )
+                ),
+                execution_options={"synchronize_session": False},
             )
             session.commit()
             return result.rowcount or 0
@@ -209,7 +211,10 @@ class DocumentJobRunner:
 
 
 class DocumentJobWorker:
-    """Runs jobs in a background thread; `notify()` wakes it as soon as a job is queued."""
+    """Runs jobs in a background thread; `notify()` wakes it as soon as a job is queued.
+
+    Old finished jobs are removed by the daily MaintenanceWorker (runner.purge_finished).
+    """
 
     def __init__(self, runner: DocumentJobRunner, *, poll_seconds: float = 5.0) -> None:
         self._runner = runner
@@ -217,7 +222,6 @@ class DocumentJobWorker:
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._purged_at = float("-inf")
 
     def start(self) -> None:
         requeued = self._runner.recover_interrupted()
@@ -238,9 +242,6 @@ class DocumentJobWorker:
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
-                if time.monotonic() - self._purged_at > 24 * 60 * 60:
-                    self._purged_at = time.monotonic()
-                    self._runner.purge_finished()
                 if self._runner.run_next() is not None:
                     continue
             except Exception:

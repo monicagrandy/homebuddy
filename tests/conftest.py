@@ -21,6 +21,7 @@ os.environ["RATE_LIMIT_QUERIES_PER_MINUTE"] = "0"
 os.environ["RATE_LIMIT_DOCUMENTS_PER_MINUTE"] = "0"
 # Tests run indexing jobs explicitly with DocumentJobRunner.run_next().
 os.environ["DOCUMENT_JOBS_ENABLED"] = "false"
+os.environ["MAINTENANCE_ENABLED"] = "false"
 
 
 import time

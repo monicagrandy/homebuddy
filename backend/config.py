@@ -92,6 +92,10 @@ class Settings:
     # Runs queued indexing jobs in a background thread of the backend process.
     document_jobs_enabled = bool_env("DOCUMENT_JOBS_ENABLED", True)
     max_upload_bytes = _int_env("MAX_UPLOAD_MB", 50) * 1024 * 1024
+    # Chats with no activity for this many days are deleted; 0 keeps them forever.
+    conversation_retention_days = _int_env("CONVERSATION_RETENTION_DAYS", 90)
+    # Daily housekeeping thread (retention, old job cleanup).
+    maintenance_enabled = bool_env("MAINTENANCE_ENABLED", True)
     db_max_overflow = _int_env("DB_MAX_OVERFLOW", 20)
 
     @property

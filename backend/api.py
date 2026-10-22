@@ -4,12 +4,12 @@ import queue
 import secrets
 import threading
 from contextlib import asynccontextmanager
-from datetime import datetime, time
+from datetime import datetime, time, timedelta, timezone
 from urllib.parse import urlparse
 
 import uuid
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
@@ -45,6 +45,7 @@ from backend.rate_limit import rate_limited
 from backend.models import (
     Asset,
     Case,
+    Conversation,
     ConversationMessage,
     Document,
     IngestionJob,
@@ -65,6 +66,7 @@ from backend.schemas import (
     CaseUpdate,
     CaseOut,
     ConversationMessageOut,
+    ConversationOut,
     DocumentIndexResponse,
     DocumentJobOut,
     DocumentOut,
@@ -79,7 +81,9 @@ from backend.schemas import (
     TaskOut,
     UserOut,
 )
+from backend.services import conversations as conversation_store
 from backend.services.document_jobs import DocumentJobRunner, DocumentJobWorker, utc_now
+from backend.services.maintenance import MaintenanceWorker
 from backend.services.documents import allocate_entry_id, find_duplicate, sha256_hex
 from backend.services.ingestion_service import IngestionError, IngestionService
 from backend.services.query_service import QueryService
@@ -98,6 +102,50 @@ _SSE_PING_SECONDS = 15.0
 _STREAM_EVENT_VERSION = 1
 _STREAM_DONE = object()
 _document_job_worker: DocumentJobWorker | None = None
+_maintenance_worker: MaintenanceWorker | None = None
+_CONVERSATION_BUSY_MESSAGE = "Still answering your last question in this conversation. Try again in a moment."
+
+
+def _maintenance_tasks(job_runner: DocumentJobRunner) -> dict:
+    tasks = {"finished_document_jobs": job_runner.purge_finished}
+    if settings.conversation_retention_days > 0:
+        retention = timedelta(days=settings.conversation_retention_days)
+
+        def purge_conversations() -> int:
+            with SessionLocal() as session:
+                return conversation_store.purge_inactive(session, older_than=retention)
+
+        tasks["inactive_conversations"] = purge_conversations
+    return tasks
+
+
+def _owned_conversation(session: Session, *, household_id: int, session_id: str, user: User) -> Conversation | None:
+    try:
+        return conversation_store.get_owned(session, household_id=household_id, session_id=session_id, user_id=user.id)
+    except conversation_store.ConversationNotFound:
+        raise HTTPException(status_code=404, detail="Conversation not found.") from None
+
+
+def _start_conversation_query(session: Session, *, household_id: int, session_id: str, user: User) -> Conversation:
+    """The thread for this question, locked so another device can't ask in it at the same time."""
+    try:
+        conversation = conversation_store.ensure(
+            session, household_id=household_id, session_id=session_id, user_id=user.id
+        )
+    except conversation_store.ConversationNotFound:
+        raise HTTPException(status_code=404, detail="Conversation not found.") from None
+    if not conversation_store.try_start_query(session, conversation.id):
+        raise HTTPException(status_code=409, detail=_CONVERSATION_BUSY_MESSAGE)
+    return conversation
+
+
+def _finish_conversation_query(session: Session, conversation_id: int) -> None:
+    try:
+        session.rollback()
+        conversation_store.finish_query(session, conversation_id)
+    except Exception:
+        # The lock goes stale on its own after a few minutes.
+        logger.exception("Could not release conversation %s", conversation_id)
 # nginx's "client closed request" code; the caller is gone, so it is only seen in logs.
 _CLIENT_CLOSED_REQUEST = 499
 
@@ -170,18 +218,22 @@ async def lifespan(app: FastAPI):
     if settings.warm_runtime_on_startup:
         logger.info("Runtime warmup enabled; preloading critical components.")
         warm_runtime_components()
-    global _document_job_worker
+    global _document_job_worker, _maintenance_worker
+    job_runner = DocumentJobRunner(session_factory=SessionLocal, ingestion_service_factory=get_ingestion_service)
     if settings.document_jobs_enabled:
-        _document_job_worker = DocumentJobWorker(
-            DocumentJobRunner(session_factory=SessionLocal, ingestion_service_factory=get_ingestion_service)
-        )
+        _document_job_worker = DocumentJobWorker(job_runner)
         _document_job_worker.start()
+    if settings.maintenance_enabled:
+        _maintenance_worker = MaintenanceWorker(_maintenance_tasks(job_runner))
+        _maintenance_worker.start()
     try:
         yield
     finally:
-        if _document_job_worker is not None:
-            _document_job_worker.stop()
-            _document_job_worker = None
+        for worker in (_document_job_worker, _maintenance_worker):
+            if worker is not None:
+                worker.stop()
+        _document_job_worker = None
+        _maintenance_worker = None
 
 
 def api_docs_options(*, production: bool) -> dict:
@@ -408,38 +460,6 @@ def _to_langchain_messages(history: list[ConversationMessage]):
             messages.append(AIMessage(content=message.content))
     return messages
 
-def _append_conversation_message(
-    session: Session,
-    *,
-    household_id: int,
-    session_id: str,
-    role: str,
-    content: str,
-) -> None:
-    session.add(
-        ConversationMessage(
-            household_id=household_id,
-            session_id=session_id,
-            role=role,
-            content=content,
-        )
-    )
-    session.commit()
-
-def _clear_conversation_history(
-    session: Session,
-    *,
-    household_id: int,
-    session_id: str,
-) -> None:
-    session.execute(
-        delete(ConversationMessage).where(
-            ConversationMessage.household_id == household_id,
-            ConversationMessage.session_id == session_id,
-        )
-    )
-    session.commit()
-
 @app.get("/health")
 def read_root():
     return {"message": "Welcome to FastAPI"}
@@ -480,6 +500,8 @@ def list_conversation_messages(
 ):
     user = _get_or_create_user(session, identity)
     _require_household_membership(session, user.id, household_id)
+    if _owned_conversation(session, household_id=household_id, session_id=session_id, user=user) is None:
+        return []
     return _load_full_conversation_history(
         session,
         household_id=household_id,
@@ -496,11 +518,55 @@ def clear_conversation_messages(
 ):
     user = _get_or_create_user(session, identity)
     _require_household_membership(session, user.id, household_id)
-    _clear_conversation_history(
-        session,
-        household_id=household_id,
-        session_id=session_id,
+    conversation = _owned_conversation(session, household_id=household_id, session_id=session_id, user=user)
+    if conversation is not None:
+        conversation_store.delete_conversation(session, conversation)
+
+
+def _conversation_out(conversation: Conversation) -> ConversationOut:
+    return ConversationOut(
+        id=conversation.session_id,
+        household_id=conversation.household_id,
+        title=conversation.title or "New conversation",
+        created_at=conversation_store.as_utc(conversation.created_at),
+        updated_at=conversation_store.as_utc(conversation.updated_at),
     )
+
+
+@app.get("/conversations", response_model=list[ConversationOut])
+def list_conversations(
+    household_id: int,
+    updated_since: datetime | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    session: Session = Depends(get_session),
+    identity: AuthenticatedIdentity = Depends(get_current_identity),
+):
+    """The signed-in user's threads, most recent first. Pass updated_since to fetch only changes."""
+    user = _get_or_create_user(session, identity)
+    _require_household_membership(session, user.id, household_id)
+    if updated_since is not None and updated_since.tzinfo is None:
+        updated_since = updated_since.replace(tzinfo=timezone.utc)
+    return [
+        _conversation_out(conversation)
+        for conversation in conversation_store.list_for_user(
+            session, household_id=household_id, user_id=user.id, updated_since=updated_since, limit=limit
+        )
+    ]
+
+
+@app.delete("/conversations/{session_id}", status_code=204)
+def delete_conversation(
+    session_id: str,
+    household_id: int,
+    session: Session = Depends(get_session),
+    identity: AuthenticatedIdentity = Depends(get_current_identity),
+):
+    user = _get_or_create_user(session, identity)
+    _require_household_membership(session, user.id, household_id)
+    conversation = _owned_conversation(session, household_id=household_id, session_id=session_id, user=user)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    conversation_store.delete_conversation(session, conversation)
 
 
 @app.get("/households", response_model=list[HouseholdOut])
@@ -1117,6 +1183,9 @@ def query(
     if payload.asset_id is not None:
         _require_asset_in_household(session, payload.asset_id, payload.household_id)    
 
+    conversation = _start_conversation_query(
+        session, household_id=payload.household_id, session_id=payload.session_id, user=user
+    )
     try:
         prior_messages = _to_langchain_messages(
             _load_conversation_history(
@@ -1154,21 +1223,13 @@ def query(
         }
         # Persist the PII-anonymized query, not the raw one, and skip blocked turns entirely.
         if not result.get("input_blocked"):
-            _append_conversation_message(
+            conversation_store.append_message(
                 session,
-                household_id=payload.household_id,
-                session_id=payload.session_id,
+                conversation,
                 role="user",
                 content=result.get("sanitized_query") or payload.question,
             )
-            _append_conversation_message(
-                session,
-                household_id=payload.household_id,
-                session_id=payload.session_id,
-                role="assistant",
-                content=result["answer"],
-            )
-            session.commit()
+            conversation_store.append_message(session, conversation, role="assistant", content=result["answer"])
         return QueryResponse(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1178,6 +1239,8 @@ def query(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
         _raise_query_http_error(exc)
+    finally:
+        _finish_conversation_query(session, conversation.id)
 
 
 @app.post("/query/stream", dependencies=[Depends(rate_limited("query"))])
@@ -1193,6 +1256,10 @@ def query_stream(
     if payload.asset_id is not None:
         _require_asset_in_household(session, payload.asset_id, payload.household_id)
 
+    conversation = _start_conversation_query(
+        session, household_id=payload.household_id, session_id=payload.session_id, user=user
+    )
+    conversation_pk = conversation.id
     prior_messages = _to_langchain_messages(
         _load_conversation_history(
             session,
@@ -1210,19 +1277,17 @@ def query_stream(
 
     conversation_id = payload.session_id
 
-    def save_reply(persist_session: Session, content: str) -> None:
-        _append_conversation_message(
-            persist_session,
-            household_id=payload.household_id,
-            session_id=payload.session_id,
-            role="assistant",
-            content=content,
-        )
-
     def produce(emit) -> None:
         """Run the graph to completion and save the turn, whether or not the client is still listening."""
         sanitized_query = None
         with SessionLocal() as persist_session, tracing_context(tags=trace_tags, metadata=trace_metadata):
+            thread = persist_session.get(Conversation, conversation_pk)
+
+            def save(role: str, content: str) -> None:
+                # Skipped if the thread was deleted meanwhile (for example on another device).
+                if thread is not None:
+                    conversation_store.append_message(persist_session, thread, role=role, content=content)
+
             try:
                 for event in service.stream_query(
                     user_query=payload.question,
@@ -1238,13 +1303,7 @@ def query_stream(
                         event = {**event, "conversation_id": conversation_id}
                         if not sanitized_query and event.get("sanitized_query") is not None:
                             sanitized_query = event["sanitized_query"]
-                            _append_conversation_message(
-                                persist_session,
-                                household_id=payload.household_id,
-                                session_id=payload.session_id,
-                                role="user",
-                                content=sanitized_query,
-                            )
+                            save("user", sanitized_query)
                     if event.get("type") == "final":
                         result = {
                             **event["result"],
@@ -1255,22 +1314,24 @@ def query_stream(
                             ),
                         }
                         event = {**event, "result": result}
-                        save_reply(persist_session, result["answer"])
+                        save("assistant", result["answer"])
                     emit(event)
             except (ValueError, SafetyBlockError, QueryEngineError) as exc:
                 message = _streaming_query_error_message(exc)
-                save_reply(persist_session, message)
+                save("assistant", message)
                 emit({"type": "error", "message": message})
             except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
                 logger.warning("Streaming query hit temporary AI provider error: %s", exc)
                 message = _streaming_query_error_message(exc)
-                save_reply(persist_session, message)
+                save("assistant", message)
                 emit({"type": "error", "message": message})
             except Exception:
                 # Unexpected errors can carry internal details, so the client only gets a generic message.
                 logger.exception("Streaming query failed")
-                save_reply(persist_session, _UNEXPECTED_QUERY_ERROR_MESSAGE)
+                save("assistant", _UNEXPECTED_QUERY_ERROR_MESSAGE)
                 emit({"type": "error", "message": _UNEXPECTED_QUERY_ERROR_MESSAGE})
+            finally:
+                _finish_conversation_query(persist_session, conversation_pk)
 
     events: queue.Queue = queue.Queue()
 
