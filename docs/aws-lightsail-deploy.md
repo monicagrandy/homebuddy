@@ -270,6 +270,26 @@ docker compose -f docker-compose.aws.yml down -v
 
 Be careful with `-v`. That deletes your local Postgres data for this deployment.
 
+### Database migrations
+
+The backend runs `alembic upgrade head` on startup, so schema changes apply as part of `docker compose up -d --build`.
+
+The first deploy with migrations also repairs the schema left behind by older `create_all` runs: it adds `ON DELETE` rules to foreign keys and a unique constraint on documents `(household_id, entry_id)`. Before that deploy:
+
+1. Take a Lightsail snapshot.
+2. Check for duplicate document ids, which would stop the migration with a clear error (use your `POSTGRES_USER` and `POSTGRES_DB` if you changed them):
+
+```bash
+docker compose -f docker-compose.aws.yml exec db psql -U homebuddy -d home_buddy -c \
+  "SELECT household_id, entry_id, COUNT(*) FROM documents GROUP BY 1, 2 HAVING COUNT(*) > 1;"
+```
+
+3. After the deploy, confirm the version:
+
+```bash
+docker compose -f docker-compose.aws.yml exec backend alembic current
+```
+
 ## Backup advice
 
 For a portfolio project, keep it simple:

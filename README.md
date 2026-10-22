@@ -85,6 +85,14 @@ Example local connection string:
 DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/home_buddy
 ```
 
+The backend applies database migrations (Alembic, in `alembic/versions/`) every time it starts, so a fresh database needs no manual setup. When you change a model in `backend/models.py`, add a migration:
+
+```bash
+alembic revision --autogenerate -m "describe the change"
+alembic upgrade head
+alembic check   # fails if the database and the models disagree
+```
+
 ### 3. Start the backend and frontend
 
 Run these in separate terminals:

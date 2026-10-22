@@ -35,6 +35,7 @@ from backend.dependencies import (
 from backend.guardrails.guardrails import SafetyBlockError
 from backend.ingestion.loader import DocumentLoadError
 from backend.ingestion.pipeline import IngestionCancelled
+from backend.migrations import upgrade_database
 from backend.models import (
     Asset,
     Case,
@@ -143,10 +144,12 @@ async def lifespan(app: FastAPI):
             f"Cognito configuration is incomplete. Missing: {', '.join(missing)}"
         )
     if settings.database_url.startswith("postgresql"):
-        with engine.begin() as connection:
-            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    Base.metadata.create_all(engine)
-    _ensure_document_schema()
+        # Postgres schema is owned by Alembic (alembic/versions).
+        upgrade_database(engine)
+    else:
+        # SQLite is only used for tests and quick local runs.
+        Base.metadata.create_all(engine)
+        _ensure_document_schema()
     if settings.warm_runtime_on_startup:
         logger.info("Runtime warmup enabled; preloading critical components.")
         warm_runtime_components()
