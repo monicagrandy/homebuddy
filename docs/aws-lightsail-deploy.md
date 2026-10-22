@@ -174,6 +174,32 @@ homebuddy.yourdomain.com {
 }
 ```
 
+### API subdomain for the mobile apps
+
+The native apps call the backend directly at `api.homebuddy.chat`. The backend still publishes no port of its own; Caddy is the only way in.
+
+1. Add a second `A` record, `api`, pointing at the same static IP. Caddy requests its HTTPS certificate automatically on the next start.
+2. The `api.homebuddy.chat` block in the Caddyfile:
+   - limits request bodies (60 MB for `/documents*`, 256 KB otherwise)
+   - streams answers without buffering
+3. `docker-compose.aws.yml` runs the backend with `ENVIRONMENT=production` (hides `/docs` and `/openapi.json`) and `ALLOWED_HOSTS=api.homebuddy.chat,backend`. Override `ALLOWED_HOSTS` in `.env` if your domain differs.
+4. Per-user limits default to 10 questions and 10 document uploads per minute. Change them with `RATE_LIMIT_QUERIES_PER_MINUTE` and `RATE_LIMIT_DOCUMENTS_PER_MINUTE`.
+
+Check the Caddyfile before restarting Caddy:
+
+```bash
+docker compose -f docker-compose.aws.yml run --rm caddy caddy validate --config /etc/caddy/Caddyfile
+```
+
+After deploying, from your laptop:
+
+```bash
+curl -s https://api.homebuddy.chat/health
+curl -s -o /dev/null -w "%{http_code}\n" https://api.homebuddy.chat/docs
+```
+
+The first should return JSON and the second `404`.
+
 ## Step 5: Configure Cognito before launch
 
 HomeBuddy requires Cognito for sign-in.

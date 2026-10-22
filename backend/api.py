@@ -35,7 +35,9 @@ from backend.dependencies import (
 from backend.guardrails.guardrails import SafetyBlockError
 from backend.ingestion.loader import DocumentLoadError
 from backend.ingestion.pipeline import IngestionCancelled
+from backend.middleware import TrustedHostGuard
 from backend.migrations import upgrade_database
+from backend.rate_limit import rate_limited
 from backend.models import (
     Asset,
     Case,
@@ -77,6 +79,7 @@ from rag.query_engine import QueryEngineError
 
 logger = get_logger(__name__)
 
+_UNEXPECTED_QUERY_ERROR_MESSAGE = "Something went wrong while answering. Please try again."
 _TEMPORARY_LLM_OVERLOAD_MESSAGE = (
     "HomeBuddy is temporarily busy handling AI requests. Please try again in a few seconds."
 )
@@ -156,7 +159,15 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(lifespan=lifespan)
+def api_docs_options(*, production: bool) -> dict:
+    # The interactive docs and schema are for development; the public API doesn't advertise itself.
+    if production:
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {}
+
+
+app = FastAPI(lifespan=lifespan, **api_docs_options(production=settings.is_production))
+app.add_middleware(TrustedHostGuard)
 
 
 def _langsmith_trace_tags(*, identity: AuthenticatedIdentity, streamed: bool) -> list[str]:
@@ -782,7 +793,11 @@ async def _cancel_on_disconnect(request: Request, cancelled: threading.Event) ->
         await asyncio.sleep(_DISCONNECT_POLL_SECONDS)
 
 
-@app.post("/documents/index", response_model=DocumentIndexResponse)
+@app.post(
+    "/documents/index",
+    response_model=DocumentIndexResponse,
+    dependencies=[Depends(rate_limited("documents"))],
+)
 async def index_document(
     request: Request,
     household_id: int = Form(...),
@@ -877,7 +892,7 @@ async def index_document(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@app.post("/query", response_model=QueryResponse)
+@app.post("/query", response_model=QueryResponse, dependencies=[Depends(rate_limited("query"))])
 def query(
     payload: QueryRequest,
     service: QueryService = Depends(get_query_service),
@@ -945,7 +960,7 @@ def query(
         _raise_query_http_error(exc)
 
 
-@app.post("/query/stream")
+@app.post("/query/stream", dependencies=[Depends(rate_limited("query"))])
 def query_stream(
     payload: QueryRequest,
     service: QueryService = Depends(get_query_service),
@@ -1049,16 +1064,17 @@ def query_stream(
                 )
                 logger.warning("Streaming query hit temporary AI provider error: %s", exc)
                 yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
-            except Exception as exc:
+            except Exception:
+                # Unexpected errors can carry internal details, so the client only gets a generic message.
                 _append_conversation_message(
                     persist_session,
                     household_id=payload.household_id,
                     session_id=payload.session_id,
                     role="assistant",
-                    content=str(exc),
+                    content=_UNEXPECTED_QUERY_ERROR_MESSAGE,
                 )
                 logger.exception("Streaming query failed")
-                yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': _UNEXPECTED_QUERY_ERROR_MESSAGE})}\n\n"
                
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

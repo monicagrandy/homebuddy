@@ -25,6 +25,9 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-homebuddy}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting Docker Compose.}@db:5432/${POSTGRES_DB:-home_buddy}
       VECTOR_STORE_PROVIDER: pgvector
+      ENVIRONMENT: production
+      # Public API host, plus the internal name the Streamlit container uses.
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-api.homebuddy.chat,backend}
     depends_on:
       db:
         condition: service_healthy
@@ -48,6 +51,8 @@ services:
     restart: unless-stopped
     depends_on:
       frontend:
+        condition: service_started
+      backend:
         condition: service_started
     ports:
       - "80:80"

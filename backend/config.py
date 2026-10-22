@@ -83,6 +83,17 @@ class Settings:
     contractor_suggestion_limit = _int_env("CONTRACTOR_SUGGESTION_LIMIT", 3)
     contractor_search_monthly_limit = _int_env("CONTRACTOR_SEARCH_MONTHLY_LIMIT", 10)
     openai_max_retries = _int_env("OPENAI_MAX_RETRIES", 2)
+    environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+    # Host headers the API answers to; empty means any (local development).
+    allowed_hosts = _csv_env("ALLOWED_HOSTS")
+    rate_limit_queries_per_minute = _int_env("RATE_LIMIT_QUERIES_PER_MINUTE", 10)
+    rate_limit_documents_per_minute = _int_env("RATE_LIMIT_DOCUMENTS_PER_MINUTE", 10)
+    db_pool_size = _int_env("DB_POOL_SIZE", 10)
+    db_max_overflow = _int_env("DB_MAX_OVERFLOW", 20)
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
     reasoning_effort = "none"
 
     def _build_chat_model(self, *, model: str, temperature: float) -> ChatOpenAI:

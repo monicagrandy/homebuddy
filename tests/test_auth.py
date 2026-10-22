@@ -157,7 +157,7 @@ def test_ensure_cognito_beta_access_rejects_non_beta_user(monkeypatch):
 
 # --- Token validation against real signatures (see the cognito_tokens fixture) ---
 
-from conftest import TEST_MOBILE_CLIENT_ID, TEST_WEB_CLIENT_ID  # noqa: E402
+from cognito_fakes import TEST_MOBILE_CLIENT_ID, TEST_WEB_CLIENT_ID  # noqa: E402
 
 
 @pytest.mark.parametrize("client_id", [TEST_WEB_CLIENT_ID, TEST_MOBILE_CLIENT_ID])

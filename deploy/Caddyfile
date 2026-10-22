@@ -13,3 +13,21 @@ homebuddy.chat {
     reverse_proxy frontend:8501
 }
 
+# Public API for the native apps. This is the only site that reaches the backend.
+api.homebuddy.chat {
+    # Document uploads can be large; every other request is small JSON.
+    @uploads path /documents*
+    request_body @uploads {
+        max_size 60MB
+    }
+    @everything_else not path /documents*
+    request_body @everything_else {
+        max_size 256KB
+    }
+
+    # No `encode` here: compression would buffer streamed (SSE) answers.
+    reverse_proxy backend:8000 {
+        flush_interval -1
+    }
+}
+
