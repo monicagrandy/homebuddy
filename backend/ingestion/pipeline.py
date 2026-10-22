@@ -17,6 +17,15 @@ def _raise_if_cancelled(should_cancel: Callable[[], bool] | None) -> None:
         raise IngestionCancelled("Indexing was cancelled before the document was saved.")
 
 
+def _require_text(pages: list[str]) -> None:
+    # Scans and photos have no text layer; indexing them would store empty chunks.
+    if not any(page.strip() for page in pages):
+        raise DocumentLoadError(
+            "This PDF has no readable text (it may be a scan).",
+            code="no_text",
+        )
+
+
 class IngestionPipeline:
     def __init__(
         self,
@@ -89,13 +98,14 @@ class IngestionPipeline:
         should_cancel: Callable[[], bool] | None = None,
     ) -> dict:
         try:
-            pages = self.sanitize_pages(
-                self.loader.load_pages_from_upload(file_bytes),
-                should_cancel=should_cancel,
-            )
+            raw_pages = self.loader.load_pages_from_upload(file_bytes)
+            _require_text(raw_pages)
+            pages = self.sanitize_pages(raw_pages, should_cancel=should_cancel)
             chunks = []
             for page_idx, page_text in enumerate(pages):
                 for chunk in self.recursive_split(page_text, max_size=self.chunk_size):
+                    if not chunk.strip():
+                        continue
                     chunks.append(
                         {
                             "text": chunk,
@@ -133,16 +143,15 @@ class IngestionPipeline:
         should_cancel: Callable[[], bool] | None = None,
     ) -> dict:
         try:
-            pages = self.sanitize_pages(
-                self.loader.load_pages_from_url(url),
-                should_cancel=should_cancel,
-            )
-            if not pages:
-                raise DocumentLoadError("No text content could be extracted from this PDF.")
+            raw_pages = self.loader.load_pages_from_url(url)
+            _require_text(raw_pages)
+            pages = self.sanitize_pages(raw_pages, should_cancel=should_cancel)
 
             chunks = []
             for page_idx, page_text in enumerate(pages):
                 for chunk in self.recursive_split(page_text, max_size=self.chunk_size):
+                    if not chunk.strip():
+                        continue
                     chunks.append(
                         {
                             "text": chunk,

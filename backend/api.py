@@ -5,8 +5,11 @@ import secrets
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, time
+from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+import uuid
+
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
@@ -44,6 +47,7 @@ from backend.models import (
     Case,
     ConversationMessage,
     Document,
+    IngestionJob,
     Household,
     HouseholdInvitation,
     HouseholdMember,
@@ -62,6 +66,7 @@ from backend.schemas import (
     CaseOut,
     ConversationMessageOut,
     DocumentIndexResponse,
+    DocumentJobOut,
     DocumentOut,
     HouseholdCreate,
     HouseholdInvitationCreate,
@@ -74,6 +79,8 @@ from backend.schemas import (
     TaskOut,
     UserOut,
 )
+from backend.services.document_jobs import DocumentJobRunner, DocumentJobWorker, utc_now
+from backend.services.documents import allocate_entry_id, find_duplicate, sha256_hex
 from backend.services.ingestion_service import IngestionError, IngestionService
 from backend.services.query_service import QueryService
 from rag.query_engine import QueryEngineError
@@ -90,6 +97,7 @@ _SSE_PING_SECONDS = 15.0
 # Bumped when a streamed event changes shape in a way clients must handle.
 _STREAM_EVENT_VERSION = 1
 _STREAM_DONE = object()
+_document_job_worker: DocumentJobWorker | None = None
 # nginx's "client closed request" code; the caller is gone, so it is only seen in logs.
 _CLIENT_CLOSED_REQUEST = 499
 
@@ -162,7 +170,18 @@ async def lifespan(app: FastAPI):
     if settings.warm_runtime_on_startup:
         logger.info("Runtime warmup enabled; preloading critical components.")
         warm_runtime_components()
-    yield
+    global _document_job_worker
+    if settings.document_jobs_enabled:
+        _document_job_worker = DocumentJobWorker(
+            DocumentJobRunner(session_factory=SessionLocal, ingestion_service_factory=get_ingestion_service)
+        )
+        _document_job_worker.start()
+    try:
+        yield
+    finally:
+        if _document_job_worker is not None:
+            _document_job_worker.stop()
+            _document_job_worker = None
 
 
 def api_docs_options(*, production: bool) -> dict:
@@ -749,6 +768,7 @@ def get_documents(
             download_url=document.source_url,
             doc_type=document.doc_type,
             uploaded_at=document.uploaded_at,
+            status=document.status,
         )
         for document in documents
     ]
@@ -913,13 +933,16 @@ async def index_document(
                 source_name=display_name or (file.filename if file else entry_id),
                 source_url=source_url,
                 file_bytes=source_file_bytes,
-                storage_key = None
+                storage_key = None,
+                content_sha256=sha256_hex(source_file_bytes) if source_file_bytes else None,
+                uploaded_by_user_id=user.id,
             )
             session.add(document)
         else:
             document.source_name = display_name or document.source_name or (file.filename if file else entry_id)
             document.source_url = source_url
             document.file_bytes = source_file_bytes
+            document.content_sha256 = sha256_hex(source_file_bytes) if source_file_bytes else None
             document.storage_key = None
             document.doc_type = doc_type
             if document.household_id is None:
@@ -936,6 +959,149 @@ async def index_document(
         raise HTTPException(status_code=_CLIENT_CLOSED_REQUEST, detail=str(exc)) from exc
     except IngestionError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+def _job_out(job: IngestionJob) -> DocumentJobOut:
+    return DocumentJobOut(
+        job_id=job.id,
+        entry_id=job.entry_id,
+        status=job.status,
+        error_code=job.error_code,
+        error=job.error,
+        chunks_indexed=job.chunks_indexed,
+        attempts=job.attempts,
+    )
+
+
+def _upload_error(status_code: int, code: str, message: str) -> HTTPException:
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message})
+
+
+def _read_upload(file: UploadFile) -> bytes:
+    data = file.file.read(settings.max_upload_bytes + 1)
+    if len(data) > settings.max_upload_bytes:
+        raise _upload_error(
+            413, "too_large", f"The PDF is too large. Maximum supported size is {settings.max_upload_bytes // (1024 * 1024)} MB."
+        )
+    if not data:
+        raise _upload_error(422, "empty", "The uploaded file is empty.")
+    if b"%PDF-" not in data[:1024]:
+        raise _upload_error(422, "not_pdf", "The uploaded file is not a PDF.")
+    return data
+
+
+def _validated_url(url: str) -> str:
+    url = url.strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or len(url) > 2048:
+        raise _upload_error(422, "invalid_url", "Enter a web address that starts with http:// or https://.")
+    return url
+
+
+@app.post(
+    "/documents/jobs",
+    response_model=DocumentJobOut,
+    status_code=202,
+    dependencies=[Depends(rate_limited("documents"))],
+)
+def create_document_job(
+    response: Response,
+    household_id: int = Form(...),
+    display_name: str = Form(..., min_length=1, max_length=200),
+    doc_type: str = Form(..., min_length=1, max_length=50),
+    url: str | None = Form(None),
+    file: UploadFile | None = File(None),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key", max_length=100),
+    session: Session = Depends(get_session),
+    identity: AuthenticatedIdentity = Depends(get_current_identity),
+):
+    """Store a PDF (or URL) and index it in the background. Poll GET /documents/jobs/{job_id}."""
+    user = _get_or_create_user(session, identity)
+    _require_household_membership(session, user.id, household_id)
+
+    if idempotency_key:
+        existing_job = session.scalar(
+            select(IngestionJob).where(IngestionJob.user_id == user.id, IngestionJob.idempotency_key == idempotency_key)
+        )
+        if existing_job is not None:
+            response.status_code = 200
+            return _job_out(existing_job)
+
+    if (file is None) == (url is None):
+        raise _upload_error(400, "invalid", "Provide either a PDF file or a URL.")
+
+    file_bytes = _read_upload(file) if file is not None else None
+    source_url = _validated_url(url) if url is not None else None
+    content_sha256 = sha256_hex(file_bytes) if file_bytes else None
+
+    duplicate = find_duplicate(session, household_id=household_id, content_sha256=content_sha256, source_url=source_url)
+    if duplicate is not None:
+        response.status_code = 200
+        return DocumentJobOut(entry_id=duplicate.entry_id, status="duplicate", duplicate_of=duplicate.entry_id)
+
+    for attempt in range(2):
+        entry_id = allocate_entry_id(session, household_id=household_id, display_name=display_name.strip())
+        session.add(
+            Document(
+                entry_id=entry_id,
+                household_id=household_id,
+                doc_type=doc_type,
+                source_name=display_name.strip(),
+                source_url=source_url,
+                file_bytes=file_bytes,
+                content_sha256=content_sha256,
+                uploaded_by_user_id=user.id,
+                status="indexing",
+            )
+        )
+        job = IngestionJob(
+            id=str(uuid.uuid4()),
+            household_id=household_id,
+            user_id=user.id,
+            entry_id=entry_id,
+            created_document=True,
+            status="queued",
+            attempts=0,
+            idempotency_key=idempotency_key,
+            run_after=utc_now(),
+        )
+        session.add(job)
+        try:
+            session.commit()
+            break
+        except IntegrityError:
+            # Another request (often a retry from the same phone) won the race.
+            session.rollback()
+            if idempotency_key:
+                existing_job = session.scalar(
+                    select(IngestionJob).where(
+                        IngestionJob.user_id == user.id, IngestionJob.idempotency_key == idempotency_key
+                    )
+                )
+                if existing_job is not None:
+                    response.status_code = 200
+                    return _job_out(existing_job)
+            if attempt == 1:
+                raise
+
+    if _document_job_worker is not None:
+        _document_job_worker.notify()
+    return _job_out(job)
+
+
+@app.get("/documents/jobs/{job_id}", response_model=DocumentJobOut)
+def get_document_job(
+    job_id: str,
+    session: Session = Depends(get_session),
+    identity: AuthenticatedIdentity = Depends(get_current_identity),
+):
+    user = _get_or_create_user(session, identity)
+    job = session.get(IngestionJob, job_id)
+    if job is None or session.scalar(
+        select(HouseholdMember).where(HouseholdMember.user_id == user.id, HouseholdMember.household_id == job.household_id)
+    ) is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return _job_out(job)
 
 
 @app.post("/query", response_model=QueryResponse, dependencies=[Depends(rate_limited("query"))])

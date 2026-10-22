@@ -11,7 +11,7 @@ import uuid
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import MetaData, create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 
 import backend.models  # noqa: F401
@@ -69,27 +69,25 @@ def postgres_engine():
         admin.dispose()
 
 
-def _create_legacy_schema(engine, *, keep_document_unique: bool = False) -> None:
-    """Recreate what old create_all runs left behind: no ON DELETE rules, no documents unique."""
-    legacy = MetaData()
-    for table in Base.metadata.sorted_tables:
-        table.to_metadata(legacy)
-
-    for table in legacy.tables.values():
-        for constraint in table.foreign_key_constraints:
-            constraint.ondelete = None
-            for element in constraint.elements:
-                element.ondelete = None
-
-    if not keep_document_unique:
-        documents = legacy.tables["documents"]
-        for constraint in list(documents.constraints):
-            if constraint.name == "uq_document_household_entry":
-                documents.constraints.remove(constraint)
-
+def _create_legacy_schema(engine) -> None:
+    """Recreate what old create_all runs left behind: the baseline tables, but foreign keys
+    without ON DELETE rules, no documents unique constraint, and no alembic_version."""
+    upgrade_database(engine, "0001_baseline")
     with engine.begin() as connection:
-        connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    legacy.create_all(engine)
+        inspector = inspect(connection)
+        for table in inspector.get_table_names():
+            for fk in inspector.get_foreign_keys(table):
+                columns = ", ".join(fk["constrained_columns"])
+                referred = ", ".join(fk["referred_columns"])
+                connection.execute(text(f'ALTER TABLE {table} DROP CONSTRAINT "{fk["name"]}"'))
+                connection.execute(
+                    text(
+                        f'ALTER TABLE {table} ADD CONSTRAINT "{fk["name"]}" '
+                        f"FOREIGN KEY ({columns}) REFERENCES {fk['referred_table']} ({referred})"
+                    )
+                )
+        connection.execute(text("ALTER TABLE documents DROP CONSTRAINT uq_document_household_entry"))
+        connection.execute(text("DROP TABLE alembic_version"))
 
 
 def _insert_household_with_document(connection, *, entry_id: str = "manual") -> int:

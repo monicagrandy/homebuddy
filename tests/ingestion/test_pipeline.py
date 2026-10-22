@@ -1,5 +1,6 @@
 import pytest
 
+from backend.ingestion.loader import DocumentLoadError
 from backend.ingestion.pipeline import IngestionCancelled, IngestionPipeline
 
 
@@ -167,3 +168,38 @@ def test_ingest_download_does_not_write_chunks_once_cancelled():
         )
 
     assert pipeline.vector_manager.calls == []
+
+
+@pytest.mark.parametrize("ingest", ["upload", "download"])
+def test_a_pdf_without_any_text_is_rejected_before_indexing(ingest):
+    vector_store = StubVectorStore()
+    pipeline = IngestionPipeline(
+        loader=StubLoader(["", "   \n", ""]),
+        vector_manager=vector_store,
+        safety_guardrail=StubGuardrail(),
+    )
+
+    with pytest.raises(DocumentLoadError, match="no readable text") as exc_info:
+        if ingest == "upload":
+            pipeline.ingest_upload_from_file(4, "scan", b"fake-pdf", "manual", "s")
+        else:
+            pipeline.ingest_download_from_url(4, "scan", "https://example.com/scan.pdf", "manual", "s")
+
+    assert exc_info.value.code == "no_text"
+    assert vector_store.calls == []
+
+
+def test_blank_pages_in_a_readable_pdf_do_not_become_chunks():
+    vector_store = StubVectorStore()
+    pipeline = IngestionPipeline(
+        loader=StubLoader(["Clean the filter monthly.", "", "Run hot water first."]),
+        vector_manager=vector_store,
+        safety_guardrail=StubGuardrail(),
+    )
+
+    pipeline.ingest_upload_from_file(4, "manual", b"fake-pdf", "manual", "s")
+
+    assert [(chunk["page"], chunk["text"]) for chunk in vector_store.calls[0]["chunks"]] == [
+        (1, "Clean the filter monthly."),
+        (3, "Run hot water first."),
+    ]

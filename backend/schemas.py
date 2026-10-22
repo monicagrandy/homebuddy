@@ -60,6 +60,20 @@ class QueryResponse(BaseModel):
     contractor_suggestions: list[ContractorSuggestion] = Field(default_factory=list)
     sources: list[CitationOut] = Field(default_factory=list)
 
+class DocumentJobOut(BaseModel):
+    """State of a background indexing job (POST /documents/jobs, GET /documents/jobs/{job_id})."""
+
+    job_id: Optional[str] = None
+    entry_id: str
+    # queued | running | succeeded | failed, or duplicate when nothing was queued.
+    status: str
+    duplicate_of: Optional[str] = None
+    error_code: Optional[str] = None
+    error: Optional[str] = None
+    chunks_indexed: Optional[int] = None
+    attempts: int = 0
+
+
 class DocumentIndexResponse(BaseModel):
     entry_id: str
     chunks_indexed: int
@@ -74,6 +88,8 @@ class DocumentOut(BaseModel):
     download_url: Optional[str] = None
     doc_type: str
     uploaded_at: datetime | None = None
+    # "indexing" while a background job is still building its search index.
+    status: str = "ready"
 
     model_config = {"from_attributes": True}
 

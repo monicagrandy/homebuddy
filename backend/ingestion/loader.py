@@ -24,9 +24,15 @@ RETRYABLE_STATUS_CODES = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 # --- Custom Exception Boundaries ---
 class DocumentLoadError(Exception):
-    """Raised when fetching or reading a document fails."""
+    """Raised when fetching or reading a document fails.
 
-    pass
+    `code` tells clients what went wrong without parsing the message:
+    not_pdf, no_text, too_large, download_failed or load_failed.
+    """
+
+    def __init__(self, message: str, *, code: str = "load_failed") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class PDFDocumentLoader:
@@ -63,7 +69,8 @@ class PDFDocumentLoader:
             return [page.extract_text() or "" for page in reader.pages]
         except PdfReadError as e:
             raise DocumentLoadError(
-                f"The downloaded file is not a valid PDF or is corrupted: {e}"
+                f"The downloaded file is not a valid PDF or is corrupted: {e}",
+                code="not_pdf",
             ) from e
         except Exception as e:
             raise DocumentLoadError(f"Failed to read the downloaded PDF: {e}") from e
@@ -79,7 +86,8 @@ class PDFDocumentLoader:
                     self._wait_before_retry(url, attempt, f"HTTP {status_code}")
                     continue
                 raise DocumentLoadError(
-                    f"PDF download failed with HTTP {status_code}."
+                    f"PDF download failed with HTTP {status_code}.",
+                    code="download_failed",
                 ) from exc
             except httpx.TimeoutException as exc:
                 if attempt < self.download_attempts:
@@ -88,7 +96,8 @@ class PDFDocumentLoader:
                 raise DocumentLoadError(
                     "The PDF download timed out after "
                     f"{self.download_attempts} attempts. "
-                    "Try again or upload the PDF directly."
+                    "Try again or upload the PDF directly.",
+                    code="download_failed",
                 ) from exc
             except httpx.RequestError as exc:
                 if attempt < self.download_attempts:
@@ -96,10 +105,11 @@ class PDFDocumentLoader:
                     continue
                 raise DocumentLoadError(
                     "The PDF could not be downloaded after "
-                    f"{self.download_attempts} attempts: {exc}"
+                    f"{self.download_attempts} attempts: {exc}",
+                    code="download_failed",
                 ) from exc
 
-        raise DocumentLoadError("The PDF could not be downloaded.")
+        raise DocumentLoadError("The PDF could not be downloaded.", code="download_failed")
 
     def _download_pdf_once(self, url: str) -> bytes:
         with self.client.stream("GET", url, headers=PDF_REQUEST_HEADERS) as response:
@@ -113,7 +123,8 @@ class PDFDocumentLoader:
                     declared_size = None
                 if declared_size is not None and declared_size > self.max_pdf_bytes:
                     raise DocumentLoadError(
-                        f"The PDF is too large. Maximum supported size is {self._max_size_label()}."
+                        f"The PDF is too large. Maximum supported size is {self._max_size_label()}.",
+                        code="too_large",
                     )
 
             content = bytearray()
@@ -121,17 +132,20 @@ class PDFDocumentLoader:
                 content.extend(chunk)
                 if len(content) > self.max_pdf_bytes:
                     raise DocumentLoadError(
-                        f"The PDF is too large. Maximum supported size is {self._max_size_label()}."
+                        f"The PDF is too large. Maximum supported size is {self._max_size_label()}.",
+                        code="too_large",
                     )
 
         pdf_bytes = bytes(content)
         if not pdf_bytes:
-            raise DocumentLoadError("The PDF download returned an empty file.")
+            raise DocumentLoadError("The PDF download returned an empty file.", code="download_failed")
         if b"%PDF-" not in pdf_bytes[:1024]:
             content_type = response.headers.get("content-type", "unknown content type")
+            # Common for QR codes, which usually lead to a product page rather than the PDF itself.
             raise DocumentLoadError(
                 "The URL did not return a PDF "
-                f"({content_type}). Check that it links directly to a PDF file."
+                f"({content_type}). Check that it links directly to a PDF file.",
+                code="not_pdf",
             )
         return pdf_bytes
 
@@ -157,7 +171,8 @@ class PDFDocumentLoader:
             return [page.extract_text() or "" for page in reader.pages]
         except PdfReadError as e:
             raise DocumentLoadError(
-                f"The uploaded file is corrupted or not a valid PDF: {e}"
+                f"The uploaded file is corrupted or not a valid PDF: {e}",
+                code="not_pdf",
             ) from e
         except Exception as e:
             raise DocumentLoadError(f"Failed to read the uploaded document: {e}") from e

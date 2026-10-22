@@ -264,6 +264,7 @@ def test_document_upload_is_saved_and_can_be_reindexed_without_reupload(client: 
             "download_url": None,
             "doc_type": "manual",
             "uploaded_at": documents_response.json()[0]["uploaded_at"],
+            "status": "ready",
         }
     ]
 

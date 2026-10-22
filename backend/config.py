@@ -89,6 +89,9 @@ class Settings:
     rate_limit_queries_per_minute = _int_env("RATE_LIMIT_QUERIES_PER_MINUTE", 10)
     rate_limit_documents_per_minute = _int_env("RATE_LIMIT_DOCUMENTS_PER_MINUTE", 10)
     db_pool_size = _int_env("DB_POOL_SIZE", 10)
+    # Runs queued indexing jobs in a background thread of the backend process.
+    document_jobs_enabled = bool_env("DOCUMENT_JOBS_ENABLED", True)
+    max_upload_bytes = _int_env("MAX_UPLOAD_MB", 50) * 1024 * 1024
     db_max_overflow = _int_env("DB_MAX_OVERFLOW", 20)
 
     @property

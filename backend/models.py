@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.config import settings
@@ -92,7 +92,10 @@ class Asset(Base):
 
 class Document(Base):
     __tablename__ = "documents"
-    __table_args__ = (UniqueConstraint("household_id", "entry_id", name="uq_document_household_entry"),)
+    __table_args__ = (
+        UniqueConstraint("household_id", "entry_id", name="uq_document_household_entry"),
+        Index("ix_documents_household_sha256", "household_id", "content_sha256"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     entry_id: Mapped[str] = mapped_column(String)
@@ -108,8 +111,47 @@ class Document(Base):
         server_default=func.now(),
     )
     storage_key: Mapped[Optional[str]] = mapped_column(String, nullable = True)
+    # SHA-256 of the uploaded file, so the same PDF added from two devices isn't stored twice.
+    content_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    uploaded_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # "indexing" while a background job builds its chunks, then "ready".
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ready", server_default="ready")
     household: Mapped["Household"] = relationship(back_populates="documents")
     asset: Mapped["Asset"] = relationship(back_populates="documents")
+
+
+class IngestionJob(Base):
+    """A background run that indexes one document; clients poll it after uploading."""
+
+    __tablename__ = "ingestion_jobs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "idempotency_key", name="uq_ingestion_job_idempotency"),
+        Index("ix_ingestion_jobs_status_run_after", "status", "run_after"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    household_id: Mapped[int] = mapped_column(ForeignKey("households.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    entry_id: Mapped[str] = mapped_column(String, nullable=False)
+    # Whether this job created the document (a failed new upload is removed again).
+    created_document: Mapped[bool] = mapped_column(nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    error_code: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    chunks_indexed: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DocumentChunk(Base):

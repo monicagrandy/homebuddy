@@ -19,6 +19,8 @@ os.environ["ALLOWED_HOSTS"] = ""
 # Rate limits are off unless a test turns them on (tests/api/test_rate_limit.py).
 os.environ["RATE_LIMIT_QUERIES_PER_MINUTE"] = "0"
 os.environ["RATE_LIMIT_DOCUMENTS_PER_MINUTE"] = "0"
+# Tests run indexing jobs explicitly with DocumentJobRunner.run_next().
+os.environ["DOCUMENT_JOBS_ENABLED"] = "false"
 
 
 import time

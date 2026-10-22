@@ -90,8 +90,10 @@ def test_remote_loader_rejects_non_pdf_responses():
     )
     loader = PDFDocumentLoader(http_client=client)
 
-    with pytest.raises(DocumentLoadError, match="did not return a PDF"):
+    with pytest.raises(DocumentLoadError, match="did not return a PDF") as exc_info:
         loader.load_pages_from_url("https://example.com/not-a-pdf")
+    # Apps use the code to offer opening the page in a browser (QR codes often lead to web pages).
+    assert exc_info.value.code == "not_pdf"
 
 
 def test_remote_loader_enforces_the_download_size_limit():
