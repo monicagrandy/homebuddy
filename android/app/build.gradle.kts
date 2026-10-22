@@ -28,8 +28,9 @@ android {
         applicationId = "chat.homebuddy.app"
         minSdk = 26
         targetSdk = 36
+        // Bump both for every Play release. The server's MIN_ANDROID_VERSION can force older ones to update.
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
 
         buildConfigField("String", "COGNITO_DOMAIN", "\"${homeBuddyProperty("cognitoDomain", "")}\"")
         buildConfigField("String", "COGNITO_CLIENT_ID", "\"${homeBuddyProperty("cognitoClientId", "")}\"")
@@ -50,8 +51,20 @@ android {
         }
     }
 
+    // Upload key for Play App Signing, from local.properties or -P. Without it, release builds are unsigned.
+    val releaseStoreFile = homeBuddyProperty("releaseStoreFile", "")
+    if (releaseStoreFile.isNotEmpty()) {
+        signingConfigs.create("release") {
+            storeFile = file(releaseStoreFile)
+            storePassword = homeBuddyProperty("releaseStorePassword", "")
+            keyAlias = homeBuddyProperty("releaseKeyAlias", "upload")
+            keyPassword = homeBuddyProperty("releaseKeyPassword", "")
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -71,6 +84,7 @@ dependencies {
     implementation(project(":feature:home"))
     implementation(project(":feature:documents"))
     implementation(project(":feature:chat"))
+    implementation(project(":feature:account"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

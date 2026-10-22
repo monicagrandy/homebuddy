@@ -24,3 +24,8 @@ sealed interface SessionState {
 fun interface LocalDataWiper {
     suspend fun wipe()
 }
+
+sealed interface DeleteAccountResult {
+    data object Deleted : DeleteAccountResult
+    data class Failed(val message: String) : DeleteAccountResult
+}

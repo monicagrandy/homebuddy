@@ -6,6 +6,7 @@ import chat.homebuddy.core.network.BootstrapRequest
 import chat.homebuddy.core.network.HomeBuddyApi
 import chat.homebuddy.core.network.HouseholdDto
 import chat.homebuddy.core.network.UserDto
+import chat.homebuddy.core.network.parseApiError
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,6 +68,24 @@ class SessionRepository(
         return authClient.signOutUrl()
     }
 
+    /**
+     * Deletes the account everywhere (Google Play requires this in the app). On success this phone
+     * is wiped and signed out; other devices are signed out on their next request.
+     */
+    suspend fun deleteAccount(): DeleteAccountResult {
+        val response = try {
+            api.deleteAccount()
+        } catch (_: IOException) {
+            return DeleteAccountResult.Failed(OFFLINE)
+        }
+        if (!response.isSuccessful) {
+            val message = parseApiError(response.code(), response.errorBody()?.string()).message
+            return DeleteAccountResult.Failed(message)
+        }
+        endSession(ACCOUNT_DELETED)
+        return DeleteAccountResult.Deleted
+    }
+
     fun onHouseholdCreated(household: Household) {
         val current = _state.value as? SessionState.SignedIn ?: return
         _state.value = current.copy(households = current.households + household)
@@ -105,6 +124,7 @@ class SessionRepository(
 
     companion object {
         const val SESSION_ENDED = "You've been signed out. Please sign in again."
+        const val ACCOUNT_DELETED = "Your account and its data have been deleted."
         const val SIGN_IN_FAILED = "Couldn't sign in. Please try again."
         const val NOT_IN_BETA = "This account isn't part of the Home Buddy beta yet."
         const val OFFLINE = "Couldn't reach Home Buddy. Check your connection and try again."

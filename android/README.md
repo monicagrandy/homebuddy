@@ -29,10 +29,16 @@ The `prod` flavor calls `https://api.homebuddy.chat`.
 
 | Module | What it holds |
 |---|---|
-| `:app` | Activity, Hilt setup, flavors and BuildConfig, manifest (sign-out redirect, network security) |
-| `:feature:auth` | Sign-in screen, session ViewModel, theme (moves to a design-system module once there are more features) |
-| `:core:auth` | `SessionRepository` (sign-in state, refresh, sign-out), AppAuth behind the `AuthClient` interface, Keystore-encrypted token storage |
-| `:core:network` | Retrofit API, models mirroring `backend/schemas.py`, Bearer and `X-Client` headers, refresh-once-on-401 |
+| `:app` | Activity, Hilt setup, the main tabs, "Share to Home Buddy", the update gate, flavors and BuildConfig, manifest, icon |
+| `:feature:auth` | Sign-in screen and session ViewModel |
+| `:feature:home` | "Set up your home" |
+| `:feature:documents` | Documents list, uploads in progress, PDF picker, pasted links, QR import |
+| `:feature:chat` | Conversations, streamed answers with sources, the safety card, voice input |
+| `:feature:account` | Profile, privacy and terms, sign out, account deletion, "Time to update" |
+| `:core:designsystem` | The theme |
+| `:core:data` | Room read cache (documents, uploads, conversations), the upload worker, repositories |
+| `:core:auth` | `SessionRepository` (sign-in state, refresh, sign-out, deletion), AppAuth behind the `AuthClient` interface, Keystore-encrypted token storage |
+| `:core:network` | Retrofit API, models mirroring `backend/schemas.py`, the SSE stream client, Bearer and `X-Client` headers, refresh-once-on-401 |
 | `:core:testing` | Shared test helpers, including `ContractFixtures`, which reads `../contracts/fixtures` |
 
 ## Sign-in and devices
@@ -47,10 +53,14 @@ The `prod` flavor calls `https://api.homebuddy.chat`.
 Unit, contract, integration (MockWebServer) and screenshot (Roborazzi) tests run on the JVM. There are no UI-automation or end-to-end device tests by design.
 
 ```bash
-./gradlew testDevDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest
-./gradlew :feature:auth:verifyRoborazziDebug   # compares against src/test/screenshots
-./gradlew :feature:auth:recordRoborazziDebug   # after an intended UI change; commit the new images
+./gradlew testDevDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest :core:data:testDebugUnitTest \
+  :feature:auth:testDebugUnitTest :feature:home:testDebugUnitTest :feature:documents:testDebugUnitTest \
+  :feature:chat:testDebugUnitTest :feature:account:testDebugUnitTest
+./gradlew verifyRoborazziDebug   # compares against each module's src/test/screenshots
+./gradlew recordRoborazziDebug   # after an intended UI change; commit the new images
 ./gradlew lintDevDebug
 ```
+
+The manual checklist, for what automated tests can't cover (real sign-in, two phones, QR codes, voice), is in `../docs/android-testing.md`. Releasing to Google Play is in `RELEASE.md`.
 
 The contract tests read the backend's recorded responses from `../contracts/fixtures`. When the backend changes its API it regenerates those (`python scripts/export_contract.py`), and these tests show whether the app still understands them.

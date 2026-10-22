@@ -64,6 +64,14 @@ class FakeApi : HomeBuddyApi by unsupportedApi {
     override suspend fun me(): UserDto = user()
 
     override suspend fun households(): List<HouseholdDto> = households.invoke()
+
+    var deleteAccount: suspend () -> Response<Unit> = { Response.success(204, Unit) }
+    var deleteCalls = 0
+
+    override suspend fun deleteAccount(): Response<Unit> {
+        deleteCalls++
+        return deleteAccount.invoke()
+    }
 }
 
 class SessionRepositoryTest {
@@ -231,5 +239,48 @@ class SessionRepositoryTest {
         session.onHouseholdCreated(Household(8, "Cabin", "80424", "cabin", "owner"))
 
         assertEquals(listOf("Cabin"), (session.state.value as SessionState.SignedIn).households.map { it.name })
+    }
+
+    @Test
+    fun `deleting the account wipes this phone and signs out with a message`() = runTest {
+        auth.hasSavedSession = true
+        val session = repository()
+        session.restore()
+
+        assertEquals(DeleteAccountResult.Deleted, session.deleteAccount())
+
+        assertEquals(SessionState.SignedOut(SessionRepository.ACCOUNT_DELETED), session.state.value)
+        assertEquals(1, wipes)
+        assertEquals(1, auth.clears)
+    }
+
+    @Test
+    fun `if closing the sign-in fails the user stays signed in to retry`() = runTest {
+        auth.hasSavedSession = true
+        api.deleteAccount = {
+            Response.error(502, """{"detail": "Your Home Buddy data was deleted, but your sign-in account couldn't be closed. Please try again."}""".toResponseBody())
+        }
+        val session = repository()
+        session.restore()
+
+        val result = session.deleteAccount()
+
+        assertEquals(
+            DeleteAccountResult.Failed("Your Home Buddy data was deleted, but your sign-in account couldn't be closed. Please try again."),
+            result,
+        )
+        assertTrue(session.state.value is SessionState.SignedIn)
+        assertEquals(0, wipes)
+    }
+
+    @Test
+    fun `deleting while offline changes nothing`() = runTest {
+        auth.hasSavedSession = true
+        api.deleteAccount = { throw IOException("offline") }
+        val session = repository()
+        session.restore()
+
+        assertEquals(DeleteAccountResult.Failed(SessionRepository.OFFLINE), session.deleteAccount())
+        assertTrue(session.state.value is SessionState.SignedIn)
     }
 }

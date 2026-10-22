@@ -59,6 +59,10 @@ object DataModule {
         ConversationsRepository(api, streams, database.conversations())
 
     @Provides
+    @Singleton
+    fun clientConfigRepository(api: HomeBuddyApi): ClientConfigRepository = ClientConfigRepository(api)
+
+    @Provides
     @IntoSet
     fun wipeDocuments(repository: DocumentsRepository): LocalDataWiper = LocalDataWiper { repository.wipe() }
 

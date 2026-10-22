@@ -70,4 +70,11 @@ interface HomeBuddyApi {
     /** 204 when deleted; 404 when it's already gone. */
     @DELETE("conversations/{sessionId}")
     suspend fun deleteConversation(@Path("sessionId") sessionId: String, @Query("household_id") householdId: Int): Response<Unit>
+
+    /**
+     * Deletes the account: its data, then its Cognito sign-in. 204 when done; 502 when the data is
+     * gone but closing the sign-in failed (safe to retry).
+     */
+    @DELETE("me")
+    suspend fun deleteAccount(): Response<Unit>
 }

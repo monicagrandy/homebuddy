@@ -13,10 +13,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.IntentCompat
+import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.homebuddy.core.auth.SessionState
 import chat.homebuddy.core.designsystem.HomeBuddyTheme
+import chat.homebuddy.feature.account.UpdateRequiredScreen
 import chat.homebuddy.feature.auth.SessionViewModel
 import chat.homebuddy.feature.auth.SignInScreen
 import chat.homebuddy.feature.auth.toSignInUiState
@@ -65,14 +67,24 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun HomeBuddyRoot(incomingShares: IncomingShares, viewModel: SessionViewModel = hiltViewModel()) {
+private fun HomeBuddyRoot(
+    incomingShares: IncomingShares,
+    viewModel: SessionViewModel = hiltViewModel(),
+    app: AppViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val mustUpdate by app.mustUpdate.collectAsStateWithLifecycle()
     val signIn = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         viewModel.onSignInResult(result.data)
     }
     val context = LocalContext.current
     LaunchedEffect(viewModel) {
         viewModel.openInBrowser.collect { uri -> context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+    }
+
+    if (mustUpdate) {
+        UpdateRequiredScreen(onUpdate = { context.startActivity(playStoreIntent(context.packageName)) })
+        return
     }
 
     when (val current = state) {
@@ -85,3 +97,7 @@ private fun HomeBuddyRoot(incomingShares: IncomingShares, viewModel: SessionView
         else -> SignInScreen(current.toSignInUiState(), onSignIn = { signIn.launch(viewModel.signInIntent()) })
     }
 }
+
+/** The app's Play Store page (opens in the Play Store app when it's installed, the browser otherwise). */
+private fun playStoreIntent(packageName: String): Intent =
+    Intent(Intent.ACTION_VIEW, "https://play.google.com/store/apps/details?id=$packageName".toUri())

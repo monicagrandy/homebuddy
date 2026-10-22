@@ -14,6 +14,7 @@ registry/db.json
 /.deepeval/
 docs/*
 !docs/aws-lightsail-deploy.md
+!docs/android-testing.md
 /better-binder-skill/
 /test_alexa_handler.py
 /loadtests/users.json

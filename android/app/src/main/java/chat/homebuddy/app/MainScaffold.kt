@@ -1,18 +1,13 @@
 package chat.homebuddy.app
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,9 +18,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.homebuddy.core.auth.SessionState
+import chat.homebuddy.feature.account.AccountRoute
 import chat.homebuddy.feature.chat.ChatRoute
 import chat.homebuddy.feature.documents.DocumentsRoute
 import chat.homebuddy.feature.documents.IncomingShares
@@ -62,11 +57,7 @@ fun MainScaffold(session: SessionState.SignedIn, incomingShares: IncomingShares,
         when (tab) {
             Tab.DOCUMENTS -> DocumentsRoute(modifier = content)
             Tab.CHAT -> ChatRoute(modifier = content)
-            Tab.ACCOUNT -> Column(content.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(session.user.displayName ?: session.user.email, style = MaterialTheme.typography.headlineSmall)
-                Text(session.households.first().name, style = MaterialTheme.typography.bodyLarge)
-                OutlinedButton(onClick = onSignOut) { Text("Sign out") }
-            }
+            Tab.ACCOUNT -> AccountRoute(onSignOut = onSignOut, modifier = content)
         }
     }
 }
