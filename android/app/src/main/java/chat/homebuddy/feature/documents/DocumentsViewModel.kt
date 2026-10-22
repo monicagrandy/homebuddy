@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -32,7 +34,6 @@ import retrofit2.HttpException
 class DocumentsViewModel @Inject constructor(
     observeCurrentHousehold: ObserveCurrentHouseholdUseCase,
     private val repository: DocumentsRepository,
-    val incomingShares: IncomingShares,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
     private val householdId = observeCurrentHousehold()
@@ -54,8 +55,8 @@ class DocumentsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DocumentsUiState())
 
     fun refresh() {
-        val id = householdId.value ?: return
         viewModelScope.launch {
+            val id = householdId.filterNotNull().first()
             refreshing.value = true
             try {
                 repository.refresh(id)
@@ -117,8 +118,8 @@ class DocumentsViewModel @Inject constructor(
         return nameFromFileName(fromProvider ?: fallback) ?: "Manual"
     }
 
+    /** Waits for the household when the cached profile hasn't been read yet (right after launch). */
     private fun launchWithHousehold(block: suspend (Int) -> Unit) {
-        val id = householdId.value ?: return
-        viewModelScope.launch { block(id) }
+        viewModelScope.launch { block(householdId.filterNotNull().first()) }
     }
 }

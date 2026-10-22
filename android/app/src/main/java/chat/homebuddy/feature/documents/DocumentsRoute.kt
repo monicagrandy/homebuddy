@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -26,7 +27,12 @@ private sealed interface Pending {
 }
 
 @Composable
-fun DocumentsRoute(modifier: Modifier = Modifier, viewModel: DocumentsViewModel = hiltViewModel()) {
+fun DocumentsRoute(
+    share: SharedDocument?,
+    onShareOpened: () -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: DocumentsViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
@@ -40,13 +46,13 @@ fun DocumentsRoute(modifier: Modifier = Modifier, viewModel: DocumentsViewModel 
         onPauseOrDispose {}
     }
 
-    val shared by viewModel.incomingShares.pending.collectAsStateWithLifecycle()
-    LaunchedEffect(shared) {
-        when (val document = viewModel.incomingShares.take()) {
-            is SharedDocument.File -> pending = Pending.File(document.uri, viewModel.displayNameFor(document.uri, document.fileName))
-            is SharedDocument.Link -> pending = Pending.Link(document.link)
-            null -> {}
+    LaunchedEffect(share) {
+        pending = when (share) {
+            is SharedDocument.File -> Pending.File(share.uri, viewModel.displayNameFor(share.uri, null))
+            is SharedDocument.Link -> Pending.Link(share.link)
+            null -> return@LaunchedEffect
         }
+        onShareOpened()
     }
 
     val pickPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -77,7 +83,7 @@ fun DocumentsRoute(modifier: Modifier = Modifier, viewModel: DocumentsViewModel 
             onDelete = { deleting = it },
             onRetry = viewModel::retry,
             onDismiss = viewModel::dismiss,
-            onOpenLink = { url -> CustomTabsIntent.Builder().build().launchUrl(context, Uri.parse(url)) },
+            onOpenLink = { url -> CustomTabsIntent.Builder().build().launchUrl(context, url.toUri()) },
             onMessageShown = viewModel::messageShown,
         ),
         modifier = modifier,

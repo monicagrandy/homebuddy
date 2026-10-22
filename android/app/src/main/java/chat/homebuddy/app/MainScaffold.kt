@@ -2,9 +2,9 @@ package chat.homebuddy.app
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -13,50 +13,84 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import chat.homebuddy.feature.account.AccountRoute
-import chat.homebuddy.feature.chat.ChatRoute
-import chat.homebuddy.feature.documents.DocumentsRoute
-import chat.homebuddy.feature.documents.IncomingShares
+import androidx.navigation.NavController
+import androidx.navigation.NavDestination
+import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavGraphBuilder
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import chat.homebuddy.feature.account.AccountDestination
+import chat.homebuddy.feature.account.accountDestination
+import chat.homebuddy.feature.chat.ConversationListDestination
+import chat.homebuddy.feature.chat.chatDestinations
+import chat.homebuddy.feature.documents.DocumentsDestination
+import chat.homebuddy.feature.documents.documentsDestination
 
-private enum class Tab(val label: String, val icon: ImageVector) {
-    CHAT("Chat", Icons.Filled.Email),
-    DOCUMENTS("Documents", Icons.AutoMirrored.Filled.List),
-    ACCOUNT("Account", Icons.Filled.AccountCircle),
+private enum class Tab(val label: String, val icon: ImageVector, val destination: Any) {
+    CHAT("Chat", Icons.Filled.Email, ConversationListDestination),
+    DOCUMENTS("Documents", Icons.AutoMirrored.Filled.List, DocumentsDestination()),
+    ACCOUNT("Account", Icons.Filled.AccountCircle, AccountDestination),
 }
 
+/**
+ * The signed-in app. Each tab keeps its own state when you switch away and back; a conversation
+ * opens full screen over the chat tab. [share] is something shared from another app, opened in
+ * the documents tab.
+ */
 @Composable
-fun MainScaffold(incomingShares: IncomingShares, onSignOut: () -> Unit) {
-    var tab by rememberSaveable { mutableStateOf(Tab.CHAT) }
-    val shared by incomingShares.pending.collectAsStateWithLifecycle()
-    LaunchedEffect(shared) {
-        if (shared != null) tab = Tab.DOCUMENTS
-    }
+fun MainScaffold(share: DocumentsDestination?, onShareOpened: () -> Unit, onSignOut: () -> Unit) {
+    val navController = rememberNavController()
+    val entry by navController.currentBackStackEntryAsState()
+    val currentTab = Tab.entries.firstOrNull { entry?.destination.isIn(it) }
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                Tab.entries.forEach { item ->
-                    NavigationBarItem(
-                        selected = tab == item,
-                        onClick = { tab = item },
-                        icon = { Icon(item.icon, contentDescription = null) },
-                        label = { Text(item.label) },
-                    )
+            if (currentTab != null) {
+                NavigationBar {
+                    Tab.entries.forEach { tab ->
+                        NavigationBarItem(
+                            selected = tab == currentTab,
+                            onClick = { navController.navigateToTab(tab.destination, restoreState = true) },
+                            icon = { Icon(tab.icon, contentDescription = null) },
+                            label = { Text(tab.label) },
+                        )
+                    }
                 }
             }
         },
     ) { padding ->
-        val content = Modifier.padding(padding)
-        when (tab) {
-            Tab.DOCUMENTS -> DocumentsRoute(modifier = content)
-            Tab.CHAT -> ChatRoute(modifier = content)
-            Tab.ACCOUNT -> AccountRoute(onSignOut = onSignOut, modifier = content)
+        NavHost(navController, startDestination = ConversationListDestination, modifier = Modifier.padding(padding)) {
+            mainDestinations(navController, onSignOut)
         }
+        // After NavHost, so its graph is set by the time this runs.
+        LaunchedEffect(share) {
+            if (share != null) {
+                // Not restoreState: that would bring back the tab's saved entry without the share.
+                navController.navigateToTab(share, restoreState = false)
+                onShareOpened()
+            }
+        }
+    }
+}
+
+internal fun NavGraphBuilder.mainDestinations(navController: NavController, onSignOut: () -> Unit) {
+    chatDestinations(navController)
+    documentsDestination()
+    accountDestination(onSignOut)
+}
+
+private fun NavDestination?.isIn(tab: Tab): Boolean = this?.hierarchy?.any { it.hasRoute(tab.destination::class) } == true
+
+/** The usual bottom-bar navigation: one entry per tab on the back stack, and back from any tab goes to chat first. */
+internal fun NavController.navigateToTab(destination: Any, restoreState: Boolean) {
+    navigate(destination) {
+        popUpTo(graph.findStartDestination().id) { saveState = true }
+        launchSingleTop = true
+        this.restoreState = restoreState
     }
 }

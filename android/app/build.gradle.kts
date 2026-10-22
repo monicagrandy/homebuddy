@@ -3,6 +3,8 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    // Navigation routes are @Serializable classes.
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
     alias(libs.plugins.roborazzi)
@@ -104,6 +106,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.browser)
+    implementation(libs.androidx.navigation.compose)
     implementation(libs.play.services.code.scanner)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
@@ -122,4 +125,5 @@ dependencies {
     testImplementation(libs.androidx.room.runtime)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.androidx.navigation.testing)
 }

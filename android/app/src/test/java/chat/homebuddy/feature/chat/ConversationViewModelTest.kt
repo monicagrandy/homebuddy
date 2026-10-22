@@ -1,5 +1,6 @@
 package chat.homebuddy.feature.chat
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import chat.homebuddy.core.data.ConversationsRepository
@@ -19,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
@@ -46,12 +48,14 @@ private object SignedIn : AccessTokenProvider {
 /** The real ViewModel, repositories, Room and HTTP client, against a fake backend. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
-class ChatViewModelTest {
+class ConversationViewModelTest {
     private val server = MockWebServer()
     private val streamRequests = CopyOnWriteArrayList<RecordedRequest>()
     @Volatile private var streamResponse: MockResponse = MockResponse()
     private lateinit var database: HomeBuddyDatabase
-    private lateinit var viewModel: ChatViewModel
+    private lateinit var conversations: ConversationsRepository
+    private lateinit var profile: ProfileRepository
+    private lateinit var viewModel: ConversationViewModel
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
     @Before
@@ -65,8 +69,9 @@ class ChatViewModelTest {
                     path.startsWith("/auth/me") -> json("""{"id": 1, "cognito_sub": "s", "email": "pat@example.com", "display_name": "Pat"}""")
                     path.startsWith("/households") -> json("""[{"id": 7, "name": "Elm Street", "zip_code": "80202", "home_type": "condo", "role": "owner"}]""")
                     path.startsWith("/query/stream") -> streamResponse.also { streamRequests += request }
+                    path.startsWith("/conversations/gone/messages") -> MockResponse().setResponseCode(404).setBody("""{"detail": "Conversation not found."}""")
                     path.startsWith("/conversations") && path.contains("/messages") -> json("[]")
-                    path.startsWith("/conversations") -> json("[]")
+                    path.startsWith("/conversations") -> json("""[{"id": "thread-1", "household_id": 7, "title": "Dishwasher filter", "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}]""")
                     else -> MockResponse().setResponseCode(404)
                 }
             }
@@ -76,14 +81,10 @@ class ChatViewModelTest {
         val client = buildHttpClient(config, Provider<AccessTokenProvider> { SignedIn })
         val api = buildApi(config, client)
         database = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HomeBuddyDatabase::class.java).build()
-        val profile = ProfileRepository(api, database.profile())
+        profile = ProfileRepository(api, database.profile())
         profile.refresh()
-        viewModel = ChatViewModel(
-            ObserveCurrentHouseholdUseCase(profile),
-            ConversationsRepository(api, QueryStreamClient(client, config), database.conversations()),
-        )
-        scope.launch { viewModel.conversationState.collect {} }
-        scope.launch { viewModel.listState.collect {} }
+        conversations = ConversationsRepository(api, QueryStreamClient(client, config), database.conversations())
+        viewModel = conversation()
         Unit
     }
 
@@ -95,12 +96,17 @@ class ChatViewModelTest {
         Dispatchers.resetMain()
     }
 
+    /** A thread's screen; with no [id], a new thread. */
+    private fun conversation(id: String? = null) =
+        ConversationViewModel(SavedStateHandle(mapOf("id" to id)), ObserveCurrentHouseholdUseCase(profile), conversations)
+            .also { viewModel -> scope.launch { viewModel.state.collect {} } }
+
     private fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
 
     private fun awaitConversation(condition: (ConversationUiState) -> Boolean): ConversationUiState = runBlocking {
         withTimeout(5_000) {
             while (true) {
-                viewModel.conversationState.value?.takeIf(condition)?.let { return@withTimeout it }
+                viewModel.state.value.takeIf(condition)?.let { return@withTimeout it }
                 delay(10)
             }
             @Suppress("UNREACHABLE_CODE")
@@ -110,7 +116,6 @@ class ChatViewModelTest {
 
     @Test
     fun `dictation fills the draft and never sends on its own`() {
-        viewModel.newConversation()
         viewModel.onDraftChange("Kitchen:")
         viewModel.onDictationStarted()
         viewModel.onDictationResult("why is my dishwasher", final = false)
@@ -126,7 +131,6 @@ class ChatViewModelTest {
 
     @Test
     fun `sending streams the answer with its sources`() {
-        viewModel.newConversation()
         viewModel.onDraftChange("How do I clean the dishwasher filter?")
         viewModel.send()
 
@@ -143,7 +147,6 @@ class ChatViewModelTest {
     @Test
     fun `a gas question shows the safety card`() {
         streamResponse = MockResponse().setHeader("Content-Type", "text/event-stream").setBody(ContractFixtures.read("query_stream_safety.sse"))
-        viewModel.newConversation()
         viewModel.onDraftChange("I smell gas in the kitchen")
         viewModel.send()
 
@@ -153,10 +156,32 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `a thread deleted on another device closes and says why`() {
+        val list = ConversationListViewModel(ObserveCurrentHouseholdUseCase(profile), conversations)
+        scope.launch { list.state.collect {} }
+
+        val gone = conversation(id = "gone")
+        runBlocking { withTimeout(5_000) { gone.gone.first { it } } }
+        list.onConversationGone()
+
+        assertEquals("That conversation was deleted, or expired after 90 days without activity.", list.state.value.message)
+    }
+
+    @Test
+    fun `the list refreshes even before the cached profile has been read`() {
+        val list = ConversationListViewModel(ObserveCurrentHouseholdUseCase(profile), conversations)
+        scope.launch { list.state.collect {} }
+
+        list.refresh()
+
+        val items = runBlocking { withTimeout(5_000) { list.state.first { it.items.isNotEmpty() } }.items }
+        assertEquals("Dishwasher filter", items.single().title)
+    }
+
+    @Test
     fun `when another device is still being answered the question is kept to resend`() {
         streamResponse = MockResponse().setResponseCode(409)
             .setBody("""{"detail": "Still answering your last question in this conversation. Try again in a moment."}""")
-        viewModel.newConversation()
         viewModel.onDraftChange("Are you there?")
         viewModel.send()
 

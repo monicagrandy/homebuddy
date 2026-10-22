@@ -34,6 +34,8 @@ Two modules, so the one boundary that matters is enforced: screens can't reach D
 | `:core` | `core.network`, `core.auth`, `core.data`, `core.domain` (+ `core.testing` test fixtures) | Retrofit API and models mirroring `backend/schemas.py`, the SSE stream client, sign-in and token storage, the Room cache, the upload worker, stateless repositories, and the use cases that combine them (sign in, sign out, delete account, observe the session) |
 | `:app` | `app`, `designsystem`, `feature.auth`, `feature.home`, `feature.documents`, `feature.chat`, `feature.account` | Screens, ViewModels, the theme, the activity, Hilt setup, flavors and the manifest |
 
+Each feature declares its typed Navigation Compose destinations next to its screens (`ChatNavigation.kt`, `DocumentsNavigation.kt`, `AccountNavigation.kt`), and `MainScaffold` puts them in one `NavHost` with a bottom bar. Signing in and setting up a home aren't destinations: which of those shows follows the stored session.
+
 ## Sign-in and devices
 
 - Sign-in uses Cognito's hosted UI in a Custom Tab (auth code + PKCE).
