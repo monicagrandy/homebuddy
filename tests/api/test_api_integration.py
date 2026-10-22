@@ -12,6 +12,7 @@ from backend import api
 from backend.auth import AuthenticatedIdentity
 from backend.ingestion.pipeline import IngestionCancelled
 from backend.db import Base
+from conftest import TEST_MOBILE_CLIENT_ID, TEST_WEB_CLIENT_ID
 
 
 class StubIngestionService:
@@ -117,6 +118,61 @@ def test_auth_me_creates_user_from_authenticated_identity(client: TestClient):
         "email": "dev@example.com",
         "display_name": "Dev User",
     }
+
+
+def test_auth_bootstrap_creates_user_from_mobile_client_tokens(client: TestClient, cognito_tokens):
+    access_token = cognito_tokens.access_token(sub="android-sub", client_id=TEST_MOBILE_CLIENT_ID)
+    id_token = cognito_tokens.id_token(
+        sub="android-sub",
+        email="android@example.com",
+        client_id=TEST_MOBILE_CLIENT_ID,
+        access_token=access_token,
+        name="Android User",
+    )
+
+    response = client.post("/auth/bootstrap", json={"id_token": id_token, "access_token": access_token})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": 1,
+        "cognito_sub": "android-sub",
+        "email": "android@example.com",
+        "display_name": "Android User",
+    }
+
+
+def test_one_account_works_from_web_and_mobile_clients_at_once(client: TestClient, cognito_tokens):
+    api.app.dependency_overrides.pop(api.get_current_identity)
+    web_access = cognito_tokens.access_token(sub="shared-sub", client_id=TEST_WEB_CLIENT_ID)
+    mobile_access = cognito_tokens.access_token(sub="shared-sub", client_id=TEST_MOBILE_CLIENT_ID)
+    client.post(
+        "/auth/bootstrap",
+        json={
+            "id_token": cognito_tokens.id_token(sub="shared-sub", email="shared@example.com", access_token=web_access),
+            "access_token": web_access,
+        },
+    )
+    created = client.post(
+        "/households",
+        json={"name": "Primary Home", "zip_code": "80202", "home_type": "single_family"},
+        headers={"Authorization": f"Bearer {web_access}"},
+    )
+    assert created.status_code == 201
+
+    from_web = client.get("/households", headers={"Authorization": f"Bearer {web_access}"})
+    from_mobile = client.get("/households", headers={"Authorization": f"Bearer {mobile_access}"})
+
+    assert from_web.status_code == from_mobile.status_code == 200
+    assert from_mobile.json() == from_web.json() == [created.json()]
+
+
+def test_api_rejects_tokens_from_unknown_app_clients(client: TestClient, cognito_tokens):
+    api.app.dependency_overrides.pop(api.get_current_identity)
+    token = cognito_tokens.access_token(client_id="someone-elses-client")
+
+    response = client.get("/households", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
 
 
 def test_auth_me_rejects_user_outside_allowed_cognito_groups(client: TestClient, monkeypatch):

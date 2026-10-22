@@ -61,6 +61,8 @@ class Settings:
     cognito_region = os.getenv("COGNITO_REGION", "")
     cognito_user_pool_id = os.getenv("COGNITO_USER_POOL_ID", "")
     cognito_app_client_id = os.getenv("COGNITO_APP_CLIENT_ID", "")
+    # Public (no secret) app clients for the native apps, e.g. Android and later iOS.
+    cognito_mobile_app_client_ids = _csv_env("COGNITO_MOBILE_APP_CLIENT_IDS")
     cognito_issuer = os.getenv("COGNITO_ISSUER", "")
     cognito_jwks_url = os.getenv("COGNITO_JWKS_URL", "")
     cognito_app_client_secret = os.getenv("COGNITO_APP_CLIENT_SECRET")

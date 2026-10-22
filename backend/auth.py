@@ -148,6 +148,13 @@ def _require_cognito_setting(value: str | None, *, field_name: str) -> str:
         )
     return value
 
+def _allowed_client_ids() -> set[str]:
+    web_client_id = _require_cognito_setting(
+        settings.cognito_app_client_id,
+        field_name="COGNITO_APP_CLIENT_ID",
+    )
+    return {web_client_id, *settings.cognito_mobile_app_client_ids}
+
 def validate_cognito_id_token(token: str, access_token: str | None = None) -> AuthenticatedIdentity:
     if not token:
         raise HTTPException(
@@ -161,15 +168,13 @@ def validate_cognito_id_token(token: str, access_token: str | None = None) -> Au
             token,
             key,
             algorithms=["RS256"],
-            audience=_require_cognito_setting(
-                settings.cognito_app_client_id,
-                field_name="COGNITO_APP_CLIENT_ID",
-            ),
             issuer=_require_cognito_setting(
                 settings.cognito_issuer,
                 field_name="COGNITO_ISSUER",
             ),
             access_token=access_token,
+            # jose only accepts one audience; several app clients are checked below.
+            options={"verify_aud": False},
         )
     except JWTError as exc:
         logger.error("JWT decode failed: %s", exc)
@@ -177,7 +182,15 @@ def validate_cognito_id_token(token: str, access_token: str | None = None) -> Au
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"JWT decode failed: {exc}",
         )
-    
+
+    audience = claims.get("aud")
+    audiences = audience if isinstance(audience, list) else [audience]
+    if not any(aud in _allowed_client_ids() for aud in audiences):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="ID token audience did not match a HomeBuddy app client.",
+        )
+
     token_use = claims.get("token_use")
     if token_use != "id":
         raise HTTPException(
@@ -241,10 +254,7 @@ def validate_cognito_access_token(token: str) -> AuthenticatedIdentity:
         )
 
     client_id = claims.get("client_id")
-    if client_id != _require_cognito_setting(
-        settings.cognito_app_client_id,
-        field_name="COGNITO_APP_CLIENT_ID",
-    ):
+    if client_id not in _allowed_client_ids():
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Access token client id did not match this app client.",

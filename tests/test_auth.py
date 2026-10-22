@@ -153,3 +153,106 @@ def test_ensure_cognito_beta_access_rejects_non_beta_user(monkeypatch):
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "This account is not enabled for the HomeBuddy beta."
+
+
+# --- Token validation against real signatures (see the cognito_tokens fixture) ---
+
+from conftest import TEST_MOBILE_CLIENT_ID, TEST_WEB_CLIENT_ID  # noqa: E402
+
+
+@pytest.mark.parametrize("client_id", [TEST_WEB_CLIENT_ID, TEST_MOBILE_CLIENT_ID])
+def test_access_token_from_any_configured_client_is_accepted(cognito_tokens, client_id):
+    token = cognito_tokens.access_token(sub="sub-1", client_id=client_id, groups=["beta-testers"])
+
+    identity = auth.validate_cognito_access_token(token)
+
+    assert identity.subject == "sub-1"
+    assert identity.groups == ["beta-testers"]
+    assert identity.email is None
+
+
+def test_access_token_from_unknown_client_is_rejected(cognito_tokens):
+    token = cognito_tokens.access_token(client_id="someone-elses-client")
+
+    with pytest.raises(HTTPException, match="client id did not match") as exc_info:
+        auth.validate_cognito_access_token(token)
+    assert exc_info.value.status_code == 401
+
+
+def test_mobile_access_token_is_rejected_when_no_mobile_client_is_configured(cognito_tokens, monkeypatch):
+    monkeypatch.setattr(auth.settings, "cognito_mobile_app_client_ids", ())
+    token = cognito_tokens.access_token(client_id=TEST_MOBILE_CLIENT_ID)
+
+    with pytest.raises(HTTPException, match="client id did not match"):
+        auth.validate_cognito_access_token(token)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"exp": 1}, "JWT decode failed"),
+        ({"iss": "https://cognito-idp.us-east-2.amazonaws.com/other-pool"}, "JWT decode failed"),
+        ({"token_use": "id"}, "Expected a Cognito access token"),
+        ({"sub": None}, "missing subject"),
+    ],
+)
+def test_access_token_with_bad_claims_is_rejected(cognito_tokens, overrides, message):
+    token = cognito_tokens.access_token(**overrides)
+
+    with pytest.raises(HTTPException, match=message) as exc_info:
+        auth.validate_cognito_access_token(token)
+    assert exc_info.value.status_code == 401
+
+
+def test_access_token_signed_by_another_key_is_rejected(cognito_tokens, untrusted_cognito_tokens):
+    token = untrusted_cognito_tokens.access_token()
+
+    with pytest.raises(HTTPException, match="JWT decode failed"):
+        auth.validate_cognito_access_token(token)
+
+
+def test_access_token_with_unknown_kid_is_rejected_after_refreshing_keys(cognito_tokens):
+    token = cognito_tokens.access_token(kid="rotated-away")
+
+    with pytest.raises(HTTPException, match="No matching signing key"):
+        auth.validate_cognito_access_token(token)
+
+
+@pytest.mark.parametrize("client_id", [TEST_WEB_CLIENT_ID, TEST_MOBILE_CLIENT_ID])
+def test_id_token_from_any_configured_client_is_accepted(cognito_tokens, client_id):
+    access_token = cognito_tokens.access_token(client_id=client_id)
+    id_token = cognito_tokens.id_token(
+        sub="sub-1",
+        email="pat@example.com",
+        client_id=client_id,
+        access_token=access_token,
+        name="Pat Doe",
+    )
+
+    identity = auth.validate_cognito_id_token(id_token, access_token=access_token)
+
+    assert identity.subject == "sub-1"
+    assert identity.email == "pat@example.com"
+    assert identity.display_name == "Pat Doe"
+
+
+def test_id_token_for_unknown_audience_is_rejected(cognito_tokens):
+    id_token = cognito_tokens.id_token(client_id="someone-elses-client")
+
+    with pytest.raises(HTTPException, match="audience did not match") as exc_info:
+        auth.validate_cognito_id_token(id_token)
+    assert exc_info.value.status_code == 401
+
+
+def test_id_token_paired_with_a_different_access_token_is_rejected(cognito_tokens):
+    id_token = cognito_tokens.id_token(access_token=cognito_tokens.access_token())
+
+    with pytest.raises(HTTPException, match="JWT decode failed"):
+        auth.validate_cognito_id_token(id_token, access_token=cognito_tokens.access_token())
+
+
+def test_access_token_is_not_accepted_as_an_id_token(cognito_tokens):
+    access_token = cognito_tokens.access_token(aud=TEST_WEB_CLIENT_ID)
+
+    with pytest.raises(HTTPException, match="Expected a Cognito ID token"):
+        auth.validate_cognito_id_token(access_token)

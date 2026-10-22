@@ -205,6 +205,25 @@ COGNITO_LOGOUT_REDIRECT_URI=https://homebuddy.yourdomain.com
 COGNITO_ALLOWED_GROUPS=beta-testers
 ```
 
+### Android app client
+
+The Android app signs in with its own **public** app client in the same user pool, so the same account works on the web and on phones. In the user pool, add an app client:
+
+1. App type: **Public client** (no client secret; a secret can't be kept on a phone).
+2. OAuth grant: **Authorization code** only. PKCE is used automatically for public clients.
+3. Scopes: `openid`, `email`, `profile`.
+4. Callback URL `homebuddy://auth/callback` and sign-out URL `homebuddy://auth/signout`.
+5. Token lifetimes: access and ID tokens 1 hour; refresh token 30–365 days. This is how long a phone stays signed in without opening the app.
+6. Turn on token revocation.
+
+Add the new client id to the backend's `.env` (comma-separate several, e.g. when iOS arrives):
+
+```env
+COGNITO_MOBILE_APP_CLIENT_IDS=<android-client-id>
+```
+
+Every signed-in phone gets its own tokens, so one account can be signed in on several devices at once.
+
 ## Step 6: Start HomeBuddy
 
 From the repo root on the server:
