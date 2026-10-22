@@ -2,6 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Voice input; asked for the first time the mic is tapped. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Lets the app find a speech recognizer and the phone app on Android 11+. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+        </intent>
+    </queries>
 
     <!-- No backup: tokens are encrypted with a Keystore key that a restore wouldn't bring along. -->
     <application

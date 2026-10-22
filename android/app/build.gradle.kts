@@ -70,6 +70,7 @@ dependencies {
     implementation(project(":feature:auth"))
     implementation(project(":feature:home"))
     implementation(project(":feature:documents"))
+    implementation(project(":feature:chat"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

@@ -56,4 +56,8 @@ object NetworkModule {
     @Provides
     @Singleton
     fun api(config: ApiConfig, client: OkHttpClient): HomeBuddyApi = buildApi(config, client)
+
+    @Provides
+    @Singleton
+    fun queryStreamClient(config: ApiConfig, client: OkHttpClient): QueryStreamClient = QueryStreamClient(client, config)
 }

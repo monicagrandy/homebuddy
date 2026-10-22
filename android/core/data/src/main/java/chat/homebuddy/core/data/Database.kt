@@ -88,8 +88,122 @@ abstract class UploadDao {
     abstract suspend fun clear()
 }
 
-@Database(entities = [DocumentEntity::class, UploadEntity::class], version = 1)
+/** A chat thread, keyed by the session id the client chose. */
+@Entity(tableName = "conversations")
+data class ConversationEntity(
+    @PrimaryKey val id: String,
+    val householdId: Int,
+    val title: String,
+    val createdAt: String,
+    /** ISO 8601 from the server; also the cursor for incremental sync. */
+    val updatedAt: String,
+)
+
+@Entity(tableName = "messages", primaryKeys = ["conversationId", "position"])
+data class MessageEntity(
+    val conversationId: String,
+    val position: Int,
+    val role: String,
+    val content: String,
+    val createdAt: String?,
+)
+
+/** When the conversation list was last fetched in full, and the newest change seen since. */
+@Entity(tableName = "conversation_sync")
+data class ConversationSyncEntity(
+    @PrimaryKey val householdId: Int,
+    val lastFullSyncAt: Long,
+    val newestUpdatedAt: String?,
+)
+
+@Dao
+abstract class ConversationDao {
+    @Query("SELECT * FROM conversations WHERE householdId = :householdId ORDER BY updatedAt DESC")
+    abstract fun observe(householdId: Int): Flow<List<ConversationEntity>>
+
+    @Query("SELECT * FROM conversations WHERE id = :id")
+    abstract fun observeOne(id: String): Flow<ConversationEntity?>
+
+    @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY position")
+    abstract fun observeMessages(conversationId: String): Flow<List<MessageEntity>>
+
+    @Upsert
+    abstract suspend fun upsert(conversations: List<ConversationEntity>)
+
+    @Transaction
+    open suspend fun replaceAll(householdId: Int, conversations: List<ConversationEntity>) {
+        deleteForHousehold(householdId)
+        upsert(conversations)
+    }
+
+    @Transaction
+    open suspend fun replaceMessages(conversationId: String, messages: List<MessageEntity>) {
+        deleteMessages(conversationId)
+        insertMessages(messages)
+    }
+
+    @Transaction
+    open suspend fun delete(conversationId: String) {
+        deleteMessages(conversationId)
+        deleteConversation(conversationId)
+    }
+
+    @Upsert
+    abstract suspend fun insertMessages(messages: List<MessageEntity>)
+
+    @Query("DELETE FROM messages WHERE conversationId = :conversationId")
+    abstract suspend fun deleteMessages(conversationId: String)
+
+    @Query("DELETE FROM conversations WHERE id = :conversationId")
+    abstract suspend fun deleteConversation(conversationId: String)
+
+    @Query("DELETE FROM messages WHERE conversationId IN (SELECT id FROM conversations WHERE householdId = :householdId)")
+    abstract suspend fun deleteMessagesForHousehold(householdId: Int)
+
+    @Transaction
+    open suspend fun deleteForHousehold(householdId: Int) {
+        deleteMessagesForHousehold(householdId)
+        deleteConversationsForHousehold(householdId)
+    }
+
+    @Query("DELETE FROM conversations WHERE householdId = :householdId")
+    abstract suspend fun deleteConversationsForHousehold(householdId: Int)
+
+    @Query("SELECT * FROM conversation_sync WHERE householdId = :householdId")
+    abstract suspend fun syncState(householdId: Int): ConversationSyncEntity?
+
+    @Upsert
+    abstract suspend fun saveSyncState(state: ConversationSyncEntity)
+
+    @Query("DELETE FROM conversations")
+    abstract suspend fun clearConversations()
+
+    @Query("DELETE FROM messages")
+    abstract suspend fun clearMessages()
+
+    @Query("DELETE FROM conversation_sync")
+    abstract suspend fun clearSync()
+
+    @Transaction
+    open suspend fun clear() {
+        clearMessages()
+        clearConversations()
+        clearSync()
+    }
+}
+
+@Database(
+    entities = [
+        DocumentEntity::class,
+        UploadEntity::class,
+        ConversationEntity::class,
+        MessageEntity::class,
+        ConversationSyncEntity::class,
+    ],
+    version = 2,
+)
 abstract class HomeBuddyDatabase : RoomDatabase() {
     abstract fun documents(): DocumentDao
     abstract fun uploads(): UploadDao
+    abstract fun conversations(): ConversationDao
 }

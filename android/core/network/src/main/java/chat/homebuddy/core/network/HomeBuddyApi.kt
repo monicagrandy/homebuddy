@@ -55,4 +55,19 @@ interface HomeBuddyApi {
 
     @GET("documents/jobs/{jobId}")
     suspend fun documentJob(@Path("jobId") jobId: String): DocumentJobDto
+
+    /** The signed-in user's threads, newest first. [updatedSince] (ISO 8601) fetches only changes. */
+    @GET("conversations")
+    suspend fun conversations(
+        @Query("household_id") householdId: Int,
+        @Query("updated_since") updatedSince: String? = null,
+        @Query("limit") limit: Int = 100,
+    ): List<ConversationDto>
+
+    @GET("conversations/{sessionId}/messages")
+    suspend fun conversationMessages(@Path("sessionId") sessionId: String, @Query("household_id") householdId: Int): List<MessageDto>
+
+    /** 204 when deleted; 404 when it's already gone. */
+    @DELETE("conversations/{sessionId}")
+    suspend fun deleteConversation(@Path("sessionId") sessionId: String, @Query("household_id") householdId: Int): Response<Unit>
 }

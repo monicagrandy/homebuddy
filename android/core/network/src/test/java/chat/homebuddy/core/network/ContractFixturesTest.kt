@@ -122,3 +122,31 @@ class DocumentContractTest {
         assertEquals("bosch-dishwasher-manual", duplicate.duplicateOf)
     }
 }
+
+class ConversationContractTest {
+    private fun body(name: String): JsonElement =
+        HomeBuddyJson.parseToJsonElement(ContractFixtures.read(name)).jsonObject.getValue("body")
+
+    @Test
+    fun `conversations decode newest first`() {
+        val conversations = HomeBuddyJson.decodeFromJsonElement(ListSerializer(ConversationDto.serializer()), body("conversations.json"))
+
+        assertEquals(listOf("thread-4", "thread-3", "thread-2", "thread-1"), conversations.map { it.id })
+        assertEquals("I smell gas in the kitchen", conversations[1].title)
+    }
+
+    @Test
+    fun `messages decode`() {
+        val messages = HomeBuddyJson.decodeFromJsonElement(ListSerializer(MessageDto.serializer()), body("conversation_messages.json"))
+
+        assertEquals(listOf("user", "assistant"), messages.map { it.role })
+    }
+
+    @Test
+    fun `a non-streamed answer decodes with its sources`() {
+        val result = HomeBuddyJson.decodeFromJsonElement(QueryResultDto.serializer(), body("query.json"))
+
+        assertEquals("Bosch Dishwasher Manual", result.sources.single().displayName)
+        assertEquals("low", result.urgencyLevel)
+    }
+}

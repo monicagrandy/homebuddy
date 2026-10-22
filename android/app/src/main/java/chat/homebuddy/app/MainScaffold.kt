@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -26,18 +26,19 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.homebuddy.core.auth.SessionState
+import chat.homebuddy.feature.chat.ChatRoute
 import chat.homebuddy.feature.documents.DocumentsRoute
 import chat.homebuddy.feature.documents.IncomingShares
 
 private enum class Tab(val label: String, val icon: ImageVector) {
     CHAT("Chat", Icons.Filled.Email),
-    DOCUMENTS("Documents", Icons.Filled.List),
+    DOCUMENTS("Documents", Icons.AutoMirrored.Filled.List),
     ACCOUNT("Account", Icons.Filled.AccountCircle),
 }
 
 @Composable
 fun MainScaffold(session: SessionState.SignedIn, incomingShares: IncomingShares, onSignOut: () -> Unit) {
-    var tab by rememberSaveable { mutableStateOf(Tab.DOCUMENTS) }
+    var tab by rememberSaveable { mutableStateOf(Tab.CHAT) }
     val shared by incomingShares.pending.collectAsStateWithLifecycle()
     LaunchedEffect(shared) {
         if (shared != null) tab = Tab.DOCUMENTS
@@ -60,7 +61,7 @@ fun MainScaffold(session: SessionState.SignedIn, incomingShares: IncomingShares,
         val content = Modifier.padding(padding)
         when (tab) {
             Tab.DOCUMENTS -> DocumentsRoute(modifier = content)
-            Tab.CHAT -> Placeholder("Chat is coming next.", content)
+            Tab.CHAT -> ChatRoute(modifier = content)
             Tab.ACCOUNT -> Column(content.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(session.user.displayName ?: session.user.email, style = MaterialTheme.typography.headlineSmall)
                 Text(session.households.first().name, style = MaterialTheme.typography.bodyLarge)
@@ -68,9 +69,4 @@ fun MainScaffold(session: SessionState.SignedIn, incomingShares: IncomingShares,
             }
         }
     }
-}
-
-@Composable
-private fun Placeholder(text: String, modifier: Modifier) {
-    Column(modifier.fillMaxSize().padding(24.dp)) { Text(text, style = MaterialTheme.typography.bodyLarge) }
 }

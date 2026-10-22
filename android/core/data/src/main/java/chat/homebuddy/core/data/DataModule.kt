@@ -5,6 +5,7 @@ import androidx.room.Room
 import chat.homebuddy.core.auth.LocalDataWiper
 import chat.homebuddy.core.auth.SessionRepository
 import chat.homebuddy.core.network.HomeBuddyApi
+import chat.homebuddy.core.network.QueryStreamClient
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -53,6 +54,15 @@ object DataModule {
         HouseholdRepository(api, session)
 
     @Provides
+    @Singleton
+    fun conversationsRepository(api: HomeBuddyApi, streams: QueryStreamClient, database: HomeBuddyDatabase): ConversationsRepository =
+        ConversationsRepository(api, streams, database.conversations())
+
+    @Provides
     @IntoSet
     fun wipeDocuments(repository: DocumentsRepository): LocalDataWiper = LocalDataWiper { repository.wipe() }
+
+    @Provides
+    @IntoSet
+    fun wipeConversations(repository: ConversationsRepository): LocalDataWiper = LocalDataWiper { repository.wipe() }
 }
