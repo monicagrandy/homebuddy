@@ -21,6 +21,8 @@ class AuthenticatedIdentity(BaseModel):
     email: str | None = None
     display_name: str | None = None
     groups: list[str] = Field(default_factory=list)
+    # Cognito's username, which admin APIs need; it isn't always the same as `sub`.
+    username: str | None = None
 
 
 def _normalize_cognito_groups(raw_groups) -> list[str]:
@@ -268,7 +270,11 @@ def validate_cognito_access_token(token: str) -> AuthenticatedIdentity:
         )
     groups = _normalize_cognito_groups(claims.get("cognito:groups"))
 
-    return AuthenticatedIdentity(subject=subject, groups=groups)
+    return AuthenticatedIdentity(
+        subject=subject,
+        groups=groups,
+        username=claims.get("username") or claims.get("cognito:username"),
+    )
 
 
 def exchange_auth_code_for_tokens(code: str) -> dict:

@@ -250,6 +250,16 @@ COGNITO_MOBILE_APP_CLIENT_IDS=<android-client-id>
 
 Every signed-in phone gets its own tokens, so one account can be signed in on several devices at once.
 
+### Account deletion
+
+Google Play requires apps to let people delete their account both in the app and on the web. `DELETE /me` removes the user's data, then deletes their Cognito user, which needs AWS credentials:
+
+1. In IAM, create a user (or access key) whose only permission is `cognito-idp:AdminDeleteUser` on your user pool's ARN.
+2. Add its key to the server's `.env` as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. `COGNITO_USER_POOL_ID` and `COGNITO_REGION` must be set too.
+3. The web link for the Play Console's Data safety form is `https://homebuddy.chat/?page=delete-account`. After sign-in it opens My Profile, where "Delete account…" lives.
+
+Without the key, the data is still deleted but the Cognito sign-in remains, and the backend logs a warning.
+
 ## Step 6: Start HomeBuddy
 
 From the repo root on the server:

@@ -165,6 +165,14 @@ class TaskOut(TaskBase):
     model_config = {"from_attributes": True}
 
 
+class ClientConfigOut(BaseModel):
+    """Read by the native apps at startup, before sign-in."""
+
+    min_supported: dict[str, str]
+    retention_days: int
+    features: dict[str, bool]
+
+
 class UserOut(BaseModel):
     id: int
     cognito_sub: str

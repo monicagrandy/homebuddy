@@ -60,6 +60,7 @@ from backend.schemas import (
     AuthCodeExchangeRequest,
     AuthCodeExchangeResponse,
     AuthRefreshRequest,
+    ClientConfigOut,
     AssetCreate,
     AssetOut,
     CaseCreate,
@@ -82,6 +83,7 @@ from backend.schemas import (
     UserOut,
 )
 from backend.services import conversations as conversation_store
+from backend.services.accounts import CognitoUserDeleter, delete_account
 from backend.services.document_jobs import DocumentJobRunner, DocumentJobWorker, utc_now
 from backend.services.maintenance import MaintenanceWorker
 from backend.services.documents import allocate_entry_id, find_duplicate, sha256_hex
@@ -471,6 +473,47 @@ def get_me(
     session: Session = Depends(get_session),
 ):
     return _get_or_create_user(session, identity, create_if_missing=True)
+
+def get_cognito_user_deleter() -> CognitoUserDeleter | None:
+    if not settings.cognito_user_pool_id or not settings.cognito_region:
+        return None
+    return CognitoUserDeleter(user_pool_id=settings.cognito_user_pool_id, region=settings.cognito_region)
+
+
+@app.delete("/me", status_code=204)
+def delete_me(
+    identity: AuthenticatedIdentity = Depends(get_current_identity),
+    session: Session = Depends(get_session),
+    cognito: CognitoUserDeleter | None = Depends(get_cognito_user_deleter),
+):
+    """Delete the signed-in account: its data here, then its Cognito sign-in. Safe to retry."""
+    user = session.scalar(select(User).where(User.cognito_sub == identity.subject))
+    if user is not None:
+        user_id = user.id
+        removed = delete_account(session, user_id)
+        logger.info("Deleted account user_id=%s households=%s", user_id, removed)
+    if cognito is None:
+        logger.warning("Cognito user deletion isn't configured; the sign-in account %s remains", identity.subject)
+        return
+    try:
+        cognito.delete(identity.username or identity.subject)
+    except Exception as exc:
+        logger.exception("Could not delete the Cognito user %s", identity.subject)
+        raise HTTPException(
+            status_code=502,
+            detail="Your Home Buddy data was deleted, but your sign-in account couldn't be closed. Please try again.",
+        ) from exc
+
+
+@app.get("/client-config", response_model=ClientConfigOut)
+def client_config():
+    """Public: the native apps read this at startup to decide whether to ask for an update."""
+    return ClientConfigOut(
+        min_supported={"android": settings.min_android_version},
+        retention_days=settings.conversation_retention_days,
+        features={"home_operations": settings.home_operations_enabled},
+    )
+
 
 @app.post("/auth/bootstrap", response_model=UserOut)
 def auth_bootstrap(

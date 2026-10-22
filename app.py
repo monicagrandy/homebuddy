@@ -527,6 +527,11 @@ def sign_out() -> bool:
     return True
 
 
+def wants_account_deletion() -> bool:
+    # The account-deletion link given to Google Play: https://homebuddy.chat/?page=delete-account
+    return str(st.query_params.get("page", "")).strip() == "delete-account"
+
+
 def render_sign_in_screen() -> None:
     auth_eyebrow = "Private Beta" if COGNITO_ALLOWED_GROUPS else "Welcome Back"
     auth_copy = (
@@ -555,6 +560,8 @@ def render_sign_in_screen() -> None:
 
             if st.session_state.get("auth_error"):
                 st.error(st.session_state.auth_error)
+            if wants_account_deletion():
+                st.info("Sign in, then open My Profile to delete your account and all of its data.")
 
             sign_in_url = build_cognito_sign_in_url()
             if sign_in_url:
@@ -1158,9 +1165,50 @@ def render_profile_tab() -> None:
 
     if not st.session_state.households:
         st.info("No household is attached to this account yet.")
+
+    st.divider()
+    st.markdown("**Delete account**")
+    st.caption(
+        "Permanently delete your Home Buddy account, your household's saved documents and your chat history, "
+        "here and on every phone you're signed in on."
+    )
+    if st.button("Delete account…", key="open_account_delete"):
+        confirm_account_delete()
      
 # Confirmation dialogs. Closing one takes a full-app rerun (st.rerun()); a
 # fragment-scoped rerun would only redraw the dialog and leave it open.
+@st.dialog("Delete your account?")
+def confirm_account_delete() -> None:
+    st.markdown(
+        """
+        <p class="hb-dialog-copy">
+            This permanently deletes your Home Buddy account, your household, its saved documents
+            and your chat history, on the web and on every phone you're signed in on.
+            This can't be undone.
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
+    typed = st.text_input("Type DELETE to confirm", key="confirm_account_delete_text")
+    cancel_col, confirm_col = st.columns(2)
+    if cancel_col.button("Cancel", key="cancel_account_delete", use_container_width=True):
+        st.rerun()
+    if confirm_col.button(
+        "Delete account",
+        key="confirm_account_delete",
+        type="primary",
+        use_container_width=True,
+        disabled=typed.strip() != "DELETE",
+    ):
+        try:
+            delete_request("/me")
+        except Exception as exc:
+            st.error(f"Could not delete your account: {exc}")
+            return
+        sign_out()
+        st.rerun()
+
+
 @st.dialog("Delete document?")
 def confirm_document_delete(entry_id: str, display_name: str) -> None:
     st.markdown(
@@ -3607,6 +3655,9 @@ if HOME_OPERATIONS_ENABLED:
 
 if st.session_state.active_view not in nav_options:
     st.session_state.active_view = "chat"
+if wants_account_deletion():
+    st.session_state.active_view = "profile"
+    del st.query_params["page"]
 
 current_user = st.session_state.current_user or {}
 account_email = current_user.get("email") or "your account"

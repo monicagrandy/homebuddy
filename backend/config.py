@@ -96,6 +96,8 @@ class Settings:
     conversation_retention_days = _int_env("CONVERSATION_RETENTION_DAYS", 90)
     # Daily housekeeping thread (retention, old job cleanup).
     maintenance_enabled = bool_env("MAINTENANCE_ENABLED", True)
+    # Oldest app version the API still supports; older apps ask the user to update.
+    min_android_version = os.getenv("MIN_ANDROID_VERSION", "1.0.0")
     db_max_overflow = _int_env("DB_MAX_OVERFLOW", 20)
 
     @property
