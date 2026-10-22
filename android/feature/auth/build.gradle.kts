@@ -35,10 +35,7 @@ android {
 
 dependencies {
     api(project(":core:auth"))
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.compose.material3)
+    api(project(":core:designsystem"))
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.hilt.lifecycle.viewmodel.compose)

@@ -26,7 +26,6 @@ dependencies {
     api(libs.retrofit)
     api(libs.kotlinx.serialization.json)
     implementation(libs.retrofit.kotlinx.serialization)
-    implementation(libs.okhttp.sse)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

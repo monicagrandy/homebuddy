@@ -4,6 +4,8 @@ import android.content.Intent
 import app.cash.turbine.test
 import chat.homebuddy.core.network.BootstrapRequest
 import chat.homebuddy.core.network.ClientConfigDto
+import chat.homebuddy.core.network.DocumentDto
+import chat.homebuddy.core.network.DocumentJobDto
 import chat.homebuddy.core.network.HomeBuddyApi
 import chat.homebuddy.core.network.HouseholdCreateRequest
 import chat.homebuddy.core.network.HouseholdDto
@@ -12,6 +14,8 @@ import java.io.IOException
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -64,6 +68,21 @@ class FakeApi : HomeBuddyApi {
     override suspend fun createHousehold(body: HouseholdCreateRequest): HouseholdDto = error("not used")
 
     override suspend fun clientConfig(): ClientConfigDto = error("not used")
+
+    override suspend fun documents(householdId: Int): List<DocumentDto> = error("not used")
+
+    override suspend fun deleteDocument(entryId: String, householdId: Int): Response<Unit> = error("not used")
+
+    override suspend fun createDocumentJob(
+        idempotencyKey: String,
+        householdId: RequestBody,
+        displayName: RequestBody,
+        docType: RequestBody,
+        file: MultipartBody.Part?,
+        url: RequestBody?,
+    ): DocumentJobDto = error("not used")
+
+    override suspend fun documentJob(jobId: String): DocumentJobDto = error("not used")
 }
 
 class SessionRepositoryTest {

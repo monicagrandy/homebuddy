@@ -1,5 +1,6 @@
 package chat.homebuddy.feature.auth
 
+import chat.homebuddy.core.designsystem.HomeBuddyTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity

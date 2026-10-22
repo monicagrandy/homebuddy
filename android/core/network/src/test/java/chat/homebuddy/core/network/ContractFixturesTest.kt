@@ -92,3 +92,33 @@ class ContractFixturesTest {
         }
     }
 }
+
+class DocumentContractTest {
+    private fun body(name: String): JsonElement =
+        HomeBuddyJson.parseToJsonElement(ContractFixtures.read(name)).jsonObject.getValue("body")
+
+    @Test
+    fun `document lists decode with their indexing status`() {
+        val indexing = HomeBuddyJson.decodeFromJsonElement(ListSerializer(DocumentDto.serializer()), body("documents_indexing.json"))
+        val ready = HomeBuddyJson.decodeFromJsonElement(ListSerializer(DocumentDto.serializer()), body("documents_ready.json"))
+
+        assertEquals("bosch-dishwasher-manual", indexing.single().entryId)
+        assertEquals("indexing", indexing.single().status)
+        assertEquals("ready", ready.single().status)
+    }
+
+    @Test
+    fun `every document job shape decodes`() {
+        val queued = HomeBuddyJson.decodeFromJsonElement(DocumentJobDto.serializer(), body("document_job_queued.json"))
+        val succeeded = HomeBuddyJson.decodeFromJsonElement(DocumentJobDto.serializer(), body("document_job_succeeded.json"))
+        val duplicate = HomeBuddyJson.decodeFromJsonElement(DocumentJobDto.serializer(), body("document_job_duplicate.json"))
+
+        assertEquals("queued", queued.status)
+        assertTrue(queued.jobId != null)
+        assertEquals("succeeded", succeeded.status)
+        assertEquals(12, succeeded.chunksIndexed)
+        assertEquals("duplicate", duplicate.status)
+        assertNull(duplicate.jobId)
+        assertEquals("bosch-dishwasher-manual", duplicate.duplicateOf)
+    }
+}

@@ -1,5 +1,6 @@
 package chat.homebuddy.feature.auth
 
+import chat.homebuddy.core.designsystem.HomeBuddyTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize

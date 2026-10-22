@@ -1,0 +1,47 @@
+plugins {
+    alias(libs.plugins.android.library)
+    alias(libs.plugins.hilt)
+    alias(libs.plugins.ksp)
+}
+
+android {
+    namespace = "chat.homebuddy.core.data"
+    compileSdk {
+        version = release(36) {
+            minorApiLevel = 1
+        }
+    }
+    defaultConfig {
+        minSdk = 26
+        manifestPlaceholders["appAuthRedirectScheme"] = "homebuddy"
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
+dependencies {
+    api(project(":core:auth"))
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
+
+    testImplementation(project(":core:testing"))
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.okhttp.mockwebserver)
+}

@@ -114,5 +114,5 @@ class SessionRepository(
 
 internal fun UserDto.toUser() = User(id = id, email = email, displayName = displayName)
 
-internal fun HouseholdDto.toHousehold() =
+fun HouseholdDto.toHousehold() =
     Household(id = id, name = name, zipCode = zipCode, homeType = homeType, role = role)
