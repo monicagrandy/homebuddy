@@ -16,12 +16,11 @@ import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import chat.homebuddy.core.auth.SessionState
 import chat.homebuddy.designsystem.HomeBuddyTheme
 import chat.homebuddy.feature.account.UpdateRequiredScreen
+import chat.homebuddy.feature.auth.AppUiState
 import chat.homebuddy.feature.auth.SessionViewModel
 import chat.homebuddy.feature.auth.SignInScreen
-import chat.homebuddy.feature.auth.toSignInUiState
 import chat.homebuddy.feature.documents.IncomingShares
 import chat.homebuddy.feature.documents.ManualLink
 import chat.homebuddy.feature.documents.SharedDocument
@@ -73,13 +72,17 @@ private fun HomeBuddyRoot(
     app: AppViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val logoutUrl by viewModel.pendingLogoutUrl.collectAsStateWithLifecycle()
     val mustUpdate by app.mustUpdate.collectAsStateWithLifecycle()
     val signIn = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         viewModel.onSignInResult(result.data)
     }
     val context = LocalContext.current
-    LaunchedEffect(viewModel) {
-        viewModel.openInBrowser.collect { uri -> context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+    LaunchedEffect(logoutUrl) {
+        logoutUrl?.let { url ->
+            context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+            viewModel.onLogoutPageOpened()
+        }
     }
 
     if (mustUpdate) {
@@ -88,13 +91,9 @@ private fun HomeBuddyRoot(
     }
 
     when (val current = state) {
-        is SessionState.SignedIn ->
-            if (current.needsHome) {
-                HomeSetupRoute()
-            } else {
-                MainScaffold(session = current, incomingShares = incomingShares, onSignOut = viewModel::signOut)
-            }
-        else -> SignInScreen(current.toSignInUiState(), onSignIn = { signIn.launch(viewModel.signInIntent()) })
+        AppUiState.Main -> MainScaffold(incomingShares = incomingShares, onSignOut = viewModel::onSignOutClick)
+        AppUiState.HomeSetup -> HomeSetupRoute()
+        is AppUiState.SignIn -> SignInScreen(current.screen, onSignIn = { viewModel.onSignInClick()?.let(signIn::launch) })
     }
 }
 

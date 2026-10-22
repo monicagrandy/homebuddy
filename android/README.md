@@ -31,12 +31,14 @@ Two modules, so the one boundary that matters is enforced: screens can't reach D
 
 | Module | Packages | What it holds |
 |---|---|---|
-| `:core` | `core.network`, `core.auth`, `core.data` (+ `core.testing` test fixtures) | Retrofit API and models mirroring `backend/schemas.py`, the SSE stream client, sign-in, token storage, the Room cache, the upload worker, repositories |
+| `:core` | `core.network`, `core.auth`, `core.data`, `core.domain` (+ `core.testing` test fixtures) | Retrofit API and models mirroring `backend/schemas.py`, the SSE stream client, sign-in and token storage, the Room cache, the upload worker, stateless repositories, and the use cases that combine them (sign in, sign out, delete account, observe the session) |
 | `:app` | `app`, `designsystem`, `feature.auth`, `feature.home`, `feature.documents`, `feature.chat`, `feature.account` | Screens, ViewModels, the theme, the activity, Hilt setup, flavors and the manifest |
 
 ## Sign-in and devices
 
 - Sign-in uses Cognito's hosted UI in a Custom Tab (auth code + PKCE).
+- Nothing holds the session in memory. Being signed in means a refresh token is stored (encrypted with a Keystore key, in DataStore); the profile is cached in Room. `ObserveSessionUseCase` derives the session from those two.
+- Only the refresh token is written to disk. The access token lives in memory and is refreshed when it's about to expire.
 - Each phone keeps its own tokens, so one account can be signed in on several devices.
 - On a 401 the app refreshes once and retries once. If that still fails, for example because the account was deleted on another device, it wipes local data and returns to sign-in.
 - Being offline never signs anyone out.

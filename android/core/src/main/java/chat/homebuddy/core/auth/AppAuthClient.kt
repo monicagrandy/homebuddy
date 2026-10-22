@@ -1,37 +1,31 @@
 package chat.homebuddy.core.auth
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import net.openid.appauth.AuthState
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
 import net.openid.appauth.AuthorizationResponse
 import net.openid.appauth.AuthorizationService
 import net.openid.appauth.AuthorizationServiceConfiguration
+import net.openid.appauth.GrantTypeValues
 import net.openid.appauth.ResponseTypeValues
+import net.openid.appauth.TokenRequest
 import net.openid.appauth.TokenResponse
 
 /** [AuthClient] on AppAuth. PKCE is added by AppAuth automatically. */
 class AppAuthClient(
-    context: Context,
+    /** From the Hilt graph, built on the application context (see AuthModule), so no Activity can leak. */
+    private val service: AuthorizationService,
     private val config: AuthConfig,
-    private val store: AuthStateStore,
 ) : AuthClient {
-    private val service by lazy { AuthorizationService(context.applicationContext) } //TODO:  why isn't this created as part of the health dependency graph? Also what scope are we in and what scope is the context we're passing in? Is there any chance that that could leak? 
     private val serviceConfig = AuthorizationServiceConfiguration(
         Uri.parse("${config.cognitoDomain.trimEnd('/')}/oauth2/authorize"),
         Uri.parse("${config.cognitoDomain.trimEnd('/')}/oauth2/token"),
     )
-    // AuthState isn't thread-safe, and two requests refreshing at once would race on the refresh token.
-    private val mutex = Mutex()
-    private var cached: AuthState? = null
 
     override fun signInIntent(): Intent {
         val request = AuthorizationRequest.Builder(
@@ -43,7 +37,7 @@ class AppAuthClient(
         return service.getAuthorizationRequestIntent(request)
     }
 
-    override suspend fun completeSignIn(result: Intent?): AuthTokens = mutex.withLock {
+    override suspend fun exchange(result: Intent?): TokenSet {
         val data = result ?: throw SignInCancelled()
         val response = AuthorizationResponse.fromIntent(data)
         val error = AuthorizationException.fromIntent(data)
@@ -51,47 +45,30 @@ class AppAuthClient(
             if (error?.code == AuthorizationException.GeneralErrors.USER_CANCELED_AUTH_FLOW.code) throw SignInCancelled()
             throw SignInFailed(error?.errorDescription ?: "Sign-in failed.", error)
         }
-        val state = AuthState(response, error)
-        val tokenResponse = suspendCancellableCoroutine<TokenResponse> { continuation ->
-            service.performTokenRequest(response.createTokenExchangeRequest()) { tokens, exception ->
-                if (tokens != null) {
-                    continuation.resume(tokens)
-                } else {
-                    continuation.resumeWithException(SignInFailed(exception?.errorDescription ?: "Sign-in failed.", exception))
-                }
-            }
+        val tokens = try {
+            request(response.createTokenExchangeRequest())
+        } catch (failure: AuthorizationException) {
+            if (failure.isNetworkError()) throw IOException("Couldn't reach sign-in.", failure)
+            throw SignInFailed(failure.errorDescription ?: "Sign-in failed.", failure)
         }
-        state.update(tokenResponse, null)
-        // TODO: I think we should store the refresh token unencrypted but isn't it better practice to just store the shorter-lived access token in memory?
-        save(state)
-        AuthTokens(accessToken = checkNotNull(state.accessToken), idToken = state.idToken)
+        return tokens.toTokenSet() ?: throw SignInFailed("Sign-in returned no access token.")
     }
 
-    override suspend fun tokens(forceRefresh: Boolean): AuthTokens? = mutex.withLock {
-        val state = load()
-        if (!state.isAuthorized) return@withLock null
-        if (forceRefresh) state.needsTokenRefresh = true
-        val tokens = suspendCancellableCoroutine<AuthTokens?> { continuation ->
-            state.performActionWithFreshTokens(service) { accessToken, idToken, exception ->
-                when {
-                    exception == null && accessToken != null -> continuation.resume(AuthTokens(accessToken, idToken))
-                    exception?.type == AuthorizationException.TYPE_GENERAL_ERROR &&
-                        exception.code == AuthorizationException.GeneralErrors.NETWORK_ERROR.code ->
-                        continuation.resumeWithException(IOException("Couldn't reach sign-in.", exception))
-                    // Refresh token rejected (expired, revoked, account deleted): the session is over.
-                    else -> continuation.resume(null)
-                }
-            }
+    override suspend fun refresh(refreshToken: String): TokenSet? {
+        val request = TokenRequest.Builder(serviceConfig, config.clientId)
+            .setGrantType(GrantTypeValues.REFRESH_TOKEN)
+            .setRefreshToken(refreshToken)
+            .build()
+        val renewed = try {
+            request(request)
+        } catch (failure: AuthorizationException) {
+            // Cognito said no (invalid_grant: the token expired or was revoked, or the account is gone).
+            if (failure.type == AuthorizationException.TYPE_OAUTH_TOKEN_ERROR) return null
+            // Offline, a server error or a response that didn't validate: keep the session and retry later.
+            // Only IOException may leave an OkHttp interceptor, so nothing else is thrown here.
+            throw IOException("Couldn't refresh the sign-in.", failure)
         }
-        save(state) // Keeps a rotated refresh token.
-        tokens
-    }
-
-    override suspend fun hasSession(): Boolean = mutex.withLock { load().isAuthorized }
-
-    override suspend fun clear() = mutex.withLock {
-        cached = AuthState(serviceConfig)
-        store.clear()
+        return renewed.toTokenSet() ?: throw IOException("The refresh returned no access token.")
     }
 
     override fun signOutUrl(): String =
@@ -101,12 +78,20 @@ class AppAuthClient(
             .build()
             .toString()
 
-    private suspend fun load(): AuthState =
-        cached ?: (store.read()?.let { runCatching { AuthState.jsonDeserialize(it) }.getOrNull() } ?: AuthState(serviceConfig))
-            .also { cached = it }
-
-    private suspend fun save(state: AuthState) {
-        cached = state
-        store.write(state.jsonSerializeString())
+    private suspend fun request(request: TokenRequest): TokenResponse = suspendCancellableCoroutine { continuation ->
+        service.performTokenRequest(request) { response: TokenResponse?, failure: AuthorizationException? ->
+            if (response != null) {
+                continuation.resume(response)
+            } else {
+                continuation.resumeWithException(failure ?: AuthorizationException.GeneralErrors.SERVER_ERROR)
+            }
+        }
     }
+}
+
+private fun AuthorizationException.isNetworkError(): Boolean =
+    type == AuthorizationException.TYPE_GENERAL_ERROR && code == AuthorizationException.GeneralErrors.NETWORK_ERROR.code
+
+private fun TokenResponse.toTokenSet(): TokenSet? = accessToken?.let { access ->
+    TokenSet(accessToken = access, idToken = idToken, refreshToken = refreshToken, expiresAtMillis = accessTokenExpirationTime)
 }

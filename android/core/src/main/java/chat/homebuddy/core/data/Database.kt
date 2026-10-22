@@ -2,9 +2,11 @@ package chat.homebuddy.core.data
 
 import androidx.room.Dao
 import androidx.room.Database
+import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.Relation
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Upsert
@@ -192,17 +194,82 @@ abstract class ConversationDao {
     }
 }
 
+/** The signed-in user. There's at most one row: signing out clears it. */
+@Entity(tableName = "users")
+data class UserEntity(
+    @PrimaryKey val id: Int,
+    val email: String,
+    val displayName: String?,
+)
+
+@Entity(tableName = "households", primaryKeys = ["userId", "id"])
+data class HouseholdEntity(
+    val userId: Int,
+    val id: Int,
+    val name: String,
+    val zipCode: String,
+    val homeType: String,
+    val role: String,
+)
+
+/** Read in one query, so the user and their homes always change together (no "no home yet" flash). */
+data class ProfileWithHouseholds(
+    @Embedded val user: UserEntity,
+    @Relation(parentColumn = "id", entityColumn = "userId") val households: List<HouseholdEntity>,
+)
+
+@Dao
+abstract class ProfileDao {
+    @Transaction
+    @Query("SELECT * FROM users LIMIT 1")
+    abstract fun observe(): Flow<ProfileWithHouseholds?>
+
+    @Query("SELECT id FROM users LIMIT 1")
+    abstract suspend fun userId(): Int?
+
+    @Transaction
+    open suspend fun replace(user: UserEntity, households: List<HouseholdEntity>) {
+        clear()
+        insertUser(user)
+        upsertHouseholds(households)
+    }
+
+    @Upsert
+    abstract suspend fun insertUser(user: UserEntity)
+
+    @Upsert
+    abstract suspend fun upsertHouseholds(households: List<HouseholdEntity>)
+
+    @Upsert
+    abstract suspend fun upsertHousehold(household: HouseholdEntity)
+
+    @Query("DELETE FROM users")
+    abstract suspend fun clearUsers()
+
+    @Query("DELETE FROM households")
+    abstract suspend fun clearHouseholds()
+
+    @Transaction
+    open suspend fun clear() {
+        clearHouseholds()
+        clearUsers()
+    }
+}
+
 @Database(
     entities = [
+        UserEntity::class,
+        HouseholdEntity::class,
         DocumentEntity::class,
         UploadEntity::class,
         ConversationEntity::class,
         MessageEntity::class,
         ConversationSyncEntity::class,
     ],
-    version = 2,
+    version = 3,
 )
 abstract class HomeBuddyDatabase : RoomDatabase() {
+    abstract fun profile(): ProfileDao
     abstract fun documents(): DocumentDao
     abstract fun uploads(): UploadDao
     abstract fun conversations(): ConversationDao

@@ -2,10 +2,9 @@ package chat.homebuddy.feature.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import chat.homebuddy.core.auth.Household
-import chat.homebuddy.core.auth.SessionRepository
-import chat.homebuddy.core.auth.SessionState
 import chat.homebuddy.core.data.ConversationsRepository
+import chat.homebuddy.core.data.Household
+import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
 import chat.homebuddy.core.network.ApiException
 import chat.homebuddy.core.network.toApiError
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -19,7 +18,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -33,13 +31,10 @@ private const val OFFLINE = "Couldn't reach Home Buddy. Check your connection an
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    session: SessionRepository,
+    observeCurrentHousehold: ObserveCurrentHouseholdUseCase,
     private val repository: ConversationsRepository,
 ) : ViewModel() {
-    private val household = session.state
-        .map { (it as? SessionState.SignedIn)?.households?.firstOrNull() }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    private val household = observeCurrentHousehold().stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     /** The open thread's id, or null for the list. A new question gets a fresh id the server adopts. */
     private val openId = MutableStateFlow<String?>(null)

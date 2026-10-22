@@ -30,7 +30,7 @@ class FakeTokens : AccessTokenProvider {
         return current
     }
 
-    override fun onSessionRejected() {
+    override suspend fun onSessionRejected() {
         rejections++
     }
 }
@@ -129,6 +129,18 @@ class AuthenticatedClientTest {
         api.clientConfig()
 
         assertNull(server.takeRequest().getHeader("Authorization"))
+    }
+
+    @Test
+    fun `a 401 on a request sent without a token ends the session`() = runTest {
+        tokens.current = null
+        server.enqueue(unauthorized())
+
+        val error = runCatching { api.households() }.exceptionOrNull()
+
+        assertEquals(401, (error as HttpException).code())
+        assertEquals(1, server.requestCount)
+        assertEquals(1, tokens.rejections)
     }
 
     @Test

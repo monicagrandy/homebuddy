@@ -13,33 +13,35 @@ data class AuthConfig(
     val scopes: List<String> = listOf("openid", "email", "profile"),
 )
 
-data class AuthTokens(val accessToken: String, val idToken: String?)
+/** What a sign-in or refresh returns. Only [refreshToken] is ever written to disk. */
+data class TokenSet(
+    val accessToken: String,
+    val idToken: String?,
+    val refreshToken: String?,
+    /** When [accessToken] expires (epoch millis), if the server said. */
+    val expiresAtMillis: Long?,
+)
 
 class SignInCancelled : Exception("Sign-in was cancelled.")
 
 class SignInFailed(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
- * The OAuth side of signing in (Cognito hosted UI, auth code + PKCE). Kept behind an interface
- * so the AppAuth library, last released in 2021, can be replaced without touching the rest.
+ * The OAuth calls (Cognito hosted UI, auth code + PKCE). It holds no state, and sits behind an
+ * interface so the AppAuth library, last released in 2021, can be swapped without touching the rest.
  */
 interface AuthClient {
     /** Opens the hosted sign-in page in a Custom Tab. */
     fun signInIntent(): Intent
 
-    /** Finishes sign-in with the result the Custom Tab returned. Throws [SignInCancelled] or [SignInFailed]. */
-    suspend fun completeSignIn(result: Intent?): AuthTokens
+    /** Exchanges the code the Custom Tab returned for tokens. Throws [SignInCancelled], [SignInFailed] or [IOException]. */
+    suspend fun exchange(result: Intent?): TokenSet
 
     /**
-     * Current tokens, refreshed if needed. Null when there's no session or the refresh token was
-     * rejected. Throws [IOException] when Cognito can't be reached.
+     * New tokens for [refreshToken]; their refresh token is null unless the server rotated it.
+     * Returns null when [refreshToken] was rejected (expired, revoked, account deleted). Throws [IOException] offline.
      */
-    suspend fun tokens(forceRefresh: Boolean = false): AuthTokens?
-
-    suspend fun hasSession(): Boolean
-
-    /** Forgets the tokens on this device. */
-    suspend fun clear()
+    suspend fun refresh(refreshToken: String): TokenSet?
 
     /** The hosted UI's logout page, which ends its own session so the next sign-in can pick another account. */
     fun signOutUrl(): String

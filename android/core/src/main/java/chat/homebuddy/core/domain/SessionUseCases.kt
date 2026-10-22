@@ -1,0 +1,168 @@
+package chat.homebuddy.core.domain
+
+import android.content.Intent
+import chat.homebuddy.core.auth.AuthRepository
+import chat.homebuddy.core.auth.AuthState
+import chat.homebuddy.core.auth.SignInCancelled
+import chat.homebuddy.core.auth.SignInFailed
+import chat.homebuddy.core.auth.SignOutReason
+import chat.homebuddy.core.data.ConversationsRepository
+import chat.homebuddy.core.data.DocumentsRepository
+import chat.homebuddy.core.data.Household
+import chat.homebuddy.core.data.ProfileRepository
+import chat.homebuddy.core.network.parseApiError
+import java.io.IOException
+import javax.inject.Inject
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import retrofit2.HttpException
+
+/** Signed in when a refresh token is stored (like Shrine's session id), with the cached profile. */
+class ObserveSessionUseCase @Inject constructor(
+    private val auth: AuthRepository,
+    private val profile: ProfileRepository,
+) {
+    operator fun invoke(): Flow<SessionState> = combine(auth.state, profile.profile) { auth, profile ->
+        when {
+            auth is AuthState.SignedOut -> SessionState.SignedOut(auth.reason)
+            profile == null -> SessionState.Loading
+            else -> SessionState.SignedIn(profile.user, profile.households)
+        }
+    }.distinctUntilChanged()
+}
+
+/** The home the app works with. One per account for now; a picker can choose among several later. */
+class ObserveCurrentHouseholdUseCase @Inject constructor(private val profile: ProfileRepository) {
+    operator fun invoke(): Flow<Household?> = profile.profile.map { it?.households?.firstOrNull() }.distinctUntilChanged()
+}
+
+sealed interface SignInResult {
+    data object SignedIn : SignInResult
+    data object Cancelled : SignInResult
+    data object NotInBeta : SignInResult
+    data object Offline : SignInResult
+    data object Failed : SignInResult
+}
+
+class SignInUseCase @Inject constructor(
+    private val auth: AuthRepository,
+    private val profile: ProfileRepository,
+) {
+    /** The hosted sign-in page, opened in a Custom Tab. Its result goes to [invoke]. */
+    fun intent(): Intent = auth.signInIntent()
+
+    /** Exchanges the code, sets up the profile, and only then keeps the session, so a failure leaves nothing behind. */
+    suspend operator fun invoke(result: Intent?): SignInResult {
+        auth.clearSignOutReason()
+        val tokens = try {
+            auth.exchangeCode(result)
+        } catch (_: SignInCancelled) {
+            return SignInResult.Cancelled
+        } catch (_: IOException) {
+            return SignInResult.Offline
+        } catch (_: SignInFailed) {
+            return SignInResult.Failed
+        }
+        var kept = false
+        try {
+            profile.bootstrap(tokens.idToken ?: return SignInResult.Failed, tokens.accessToken)
+            auth.keepSignedIn()
+            kept = true
+            return SignInResult.SignedIn
+        } catch (error: HttpException) {
+            return if (error.code() == 403) SignInResult.NotInBeta else SignInResult.Failed
+        } catch (_: IOException) {
+            return SignInResult.Offline
+        } catch (_: SignInFailed) {
+            return SignInResult.Failed
+        } finally {
+            if (!kept) {
+                auth.forgetUnsavedSignIn()
+                withContext(NonCancellable) { profile.clear() }
+            }
+        }
+    }
+}
+
+class SignOutUseCase @Inject constructor(
+    private val auth: AuthRepository,
+    private val profile: ProfileRepository,
+    private val documents: DocumentsRepository,
+    private val conversations: ConversationsRepository,
+) {
+    /**
+     * Ends this phone's session (other devices stay signed in) and wipes what was cached for the
+     * account. It runs to the end even if the caller goes away, which it will: the screens that
+     * call it leave as soon as the session ends. [reason] is shown on the sign-in screen until
+     * the next sign-in attempt.
+     *
+     * Returns the hosted UI's logout page, for the caller to open when the user chose to sign out.
+     */
+    suspend operator fun invoke(reason: SignOutReason? = null): String = withContext(NonCancellable) {
+        auth.clear(reason)
+        documents.wipe()
+        conversations.wipe()
+        profile.clear()
+        auth.signOutUrl()
+    }
+}
+
+/** Fetches the profile again (at launch), so changes from other devices show up. */
+class RefreshProfileUseCase @Inject constructor(
+    private val auth: AuthRepository,
+    private val profile: ProfileRepository,
+    private val signOut: SignOutUseCase,
+) {
+    /** False when Home Buddy couldn't be reached or failed; the cached profile is kept. */
+    suspend operator fun invoke(): Boolean {
+        if (!auth.isSignedIn()) return true
+        return try {
+            profile.refresh()
+            true
+        } catch (error: HttpException) {
+            when (error.code()) {
+                // The HTTP client has already ended the session (see NetworkSession).
+                401 -> true
+                403 -> {
+                    signOut(SignOutReason.NOT_IN_BETA)
+                    true
+                }
+                else -> false
+            }
+        } catch (_: IOException) {
+            false
+        }
+    }
+}
+
+sealed interface DeleteAccountResult {
+    data object Deleted : DeleteAccountResult
+    data object Offline : DeleteAccountResult
+    data class Failed(val message: String) : DeleteAccountResult
+}
+
+/**
+ * Deletes the account everywhere (Google Play requires this in the app). Afterwards this phone is
+ * signed out and wiped; other devices are signed out on their next request.
+ */
+class DeleteAccountUseCase @Inject constructor(
+    private val profile: ProfileRepository,
+    private val signOut: SignOutUseCase,
+) {
+    suspend operator fun invoke(): DeleteAccountResult {
+        val response = try {
+            profile.deleteAccount()
+        } catch (_: IOException) {
+            return DeleteAccountResult.Offline
+        }
+        if (!response.isSuccessful) {
+            return DeleteAccountResult.Failed(parseApiError(response.code(), response.errorBody()?.string()).message)
+        }
+        signOut(SignOutReason.ACCOUNT_DELETED)
+        return DeleteAccountResult.Deleted
+    }
+}

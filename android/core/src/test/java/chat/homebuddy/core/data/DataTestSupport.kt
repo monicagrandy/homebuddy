@@ -32,7 +32,7 @@ class FakeScheduler : UploadScheduler {
 
 private object SignedIn : AccessTokenProvider {
     override suspend fun accessToken(forceRefresh: Boolean) = "token"
-    override fun onSessionRejected() = Unit
+    override suspend fun onSessionRejected() = Unit
 }
 
 fun inMemoryDatabase(): HomeBuddyDatabase =

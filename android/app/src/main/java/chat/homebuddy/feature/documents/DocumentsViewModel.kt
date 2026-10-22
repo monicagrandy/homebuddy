@@ -4,10 +4,9 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import chat.homebuddy.core.auth.SessionRepository
-import chat.homebuddy.core.auth.SessionState
 import chat.homebuddy.core.data.DocumentsRepository
 import chat.homebuddy.core.data.UploadFiles
+import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
 import chat.homebuddy.core.network.toApiError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -31,14 +30,13 @@ import retrofit2.HttpException
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class DocumentsViewModel @Inject constructor(
-    session: SessionRepository,
+    observeCurrentHousehold: ObserveCurrentHouseholdUseCase,
     private val repository: DocumentsRepository,
     val incomingShares: IncomingShares,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
-    // One home per account for now; the list follows whichever household the session has.
-    private val householdId = session.state
-        .map { (it as? SessionState.SignedIn)?.households?.firstOrNull()?.id }
+    private val householdId = observeCurrentHousehold()
+        .map { it?.id }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 

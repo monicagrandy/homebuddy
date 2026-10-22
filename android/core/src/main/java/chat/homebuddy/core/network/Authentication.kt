@@ -9,7 +9,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.Route
 
-/** Supplies access tokens to the HTTP client. Implemented by the session in :core:auth. */
+/** Supplies access tokens to the HTTP client. Implemented by NetworkSession in core.domain. */
 interface AccessTokenProvider {
     /**
      * A valid access token, refreshed first when it's about to expire (or when [forceRefresh]).
@@ -18,8 +18,11 @@ interface AccessTokenProvider {
      */
     suspend fun accessToken(forceRefresh: Boolean = false): String?
 
-    /** The API rejected the session even after a refresh, e.g. the account was deleted on another device. */
-    fun onSessionRejected()
+    /**
+     * The API rejected the session even after a refresh, e.g. the account was deleted on another
+     * device. Called on an OkHttp thread, which waits for it to finish.
+     */
+    suspend fun onSessionRejected()
 }
 
 private const val AUTHORIZATION = "Authorization"
@@ -34,17 +37,18 @@ class AuthInterceptor(private val tokens: Provider<AccessTokenProvider>) : Inter
     }
 }
 
-/** On a 401, refreshes once and retries once. A second 401 (or a failed refresh) ends the session. */
+/** On a 401, refreshes once and retries once. A second 401 (or one without a usable token) ends the session. */
 class TokenAuthenticator(private val tokens: Provider<AccessTokenProvider>) : Authenticator {
+    // OkHttp calls this synchronously on its own thread, so blocking until the suspend calls finish is fine here.
     override fun authenticate(route: Route?, response: Response): Request? {
-        val sent = response.request.header(AUTHORIZATION)?.removePrefix("Bearer ") ?: return null
-        if (response.priorResponse != null) {
-            tokens.get().onSessionRejected()
+        val sent = response.request.header(AUTHORIZATION)?.removePrefix("Bearer ")
+        if (sent == null || response.priorResponse != null) {
+            runBlocking { tokens.get().onSessionRejected() }
             return null
         }
         val fresh = runBlocking { tokens.get().accessToken(forceRefresh = true) }
         if (fresh == null || fresh == sent) {
-            tokens.get().onSessionRejected()
+            runBlocking { tokens.get().onSessionRejected() }
             return null
         }
         return response.request.withBearer(fresh)

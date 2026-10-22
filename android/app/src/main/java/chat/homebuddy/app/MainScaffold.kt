@@ -19,7 +19,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import chat.homebuddy.core.auth.SessionState
 import chat.homebuddy.feature.account.AccountRoute
 import chat.homebuddy.feature.chat.ChatRoute
 import chat.homebuddy.feature.documents.DocumentsRoute
@@ -32,8 +31,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 }
 
 @Composable
-//TODO: session is not used here
-fun MainScaffold(session: SessionState.SignedIn, incomingShares: IncomingShares, onSignOut: () -> Unit) {
+fun MainScaffold(incomingShares: IncomingShares, onSignOut: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(Tab.CHAT) }
     val shared by incomingShares.pending.collectAsStateWithLifecycle()
     LaunchedEffect(shared) {

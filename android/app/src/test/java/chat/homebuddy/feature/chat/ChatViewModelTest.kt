@@ -1,14 +1,11 @@
 package chat.homebuddy.feature.chat
 
-import android.content.Intent
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
-import chat.homebuddy.core.auth.AuthClient
-import chat.homebuddy.core.auth.AuthTokens
-import chat.homebuddy.core.auth.SessionRepository
-import chat.homebuddy.core.auth.SessionState
 import chat.homebuddy.core.data.ConversationsRepository
 import chat.homebuddy.core.data.HomeBuddyDatabase
+import chat.homebuddy.core.data.ProfileRepository
+import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
 import chat.homebuddy.core.network.AccessTokenProvider
 import chat.homebuddy.core.network.ApiConfig
 import chat.homebuddy.core.network.QueryStreamClient
@@ -41,13 +38,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-private class SignedInAuthClient : AuthClient {
-    override fun signInIntent(): Intent = error("not used")
-    override suspend fun completeSignIn(result: Intent?): AuthTokens = error("not used")
-    override suspend fun tokens(forceRefresh: Boolean) = AuthTokens("token", "id")
-    override suspend fun hasSession() = true
-    override suspend fun clear() = Unit
-    override fun signOutUrl() = "https://example.com/logout"
+private object SignedIn : AccessTokenProvider {
+    override suspend fun accessToken(forceRefresh: Boolean) = "token"
+    override suspend fun onSessionRejected() = Unit
 }
 
 /** The real ViewModel, repositories, Room and HTTP client, against a fake backend. */
@@ -80,14 +73,15 @@ class ChatViewModelTest {
         }
         server.start()
         val config = ApiConfig(server.url("/").toString(), "android/test")
-        lateinit var session: SessionRepository
-        val client = buildHttpClient(config, Provider<AccessTokenProvider> { session })
+        val client = buildHttpClient(config, Provider<AccessTokenProvider> { SignedIn })
         val api = buildApi(config, client)
-        session = SessionRepository(SignedInAuthClient(), api, emptySet(), scope)
-        session.restore()
-        assertTrue(session.state.value is SessionState.SignedIn)
         database = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HomeBuddyDatabase::class.java).build()
-        viewModel = ChatViewModel(session, ConversationsRepository(api, QueryStreamClient(client, config), database.conversations()))
+        val profile = ProfileRepository(api, database.profile())
+        profile.refresh()
+        viewModel = ChatViewModel(
+            ObserveCurrentHouseholdUseCase(profile),
+            ConversationsRepository(api, QueryStreamClient(client, config), database.conversations()),
+        )
         scope.launch { viewModel.conversationState.collect {} }
         scope.launch { viewModel.listState.collect {} }
         Unit
