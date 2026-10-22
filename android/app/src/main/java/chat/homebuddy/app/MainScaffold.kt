@@ -32,6 +32,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 }
 
 @Composable
+//TODO: session is not used here
 fun MainScaffold(session: SessionState.SignedIn, incomingShares: IncomingShares, onSignOut: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(Tab.CHAT) }
     val shared by incomingShares.pending.collectAsStateWithLifecycle()

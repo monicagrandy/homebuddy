@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.roborazzi)
 }
 
 // Sign-in settings come from local.properties (not committed) or -Phomebuddy.<name>=… on the command line.
@@ -77,24 +78,48 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        unitTests {
+            // Robolectric (screenshots, Room) needs the merged resources.
+            isIncludeAndroidResources = true
+        }
+    }
+}
+
+// Reference images live next to the tests and are committed: ./gradlew recordRoborazziDevDebug, then verifyRoborazziDevDebug.
+roborazzi {
+    outputDir.set(file("src/test/screenshots"))
 }
 
 dependencies {
-    implementation(project(":feature:auth"))
-    implementation(project(":feature:home"))
-    implementation(project(":feature:documents"))
-    implementation(project(":feature:chat"))
-    implementation(project(":feature:account"))
+    implementation(project(":core"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.hilt.lifecycle.viewmodel.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.core)
+    implementation(libs.androidx.browser)
+    implementation(libs.play.services.code.scanner)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 
-    testImplementation(project(":core:testing"))
+    testImplementation(testFixtures(project(":core")))
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.turbine)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.roborazzi.junit.rule)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.room.runtime)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.okhttp.mockwebserver)
 }

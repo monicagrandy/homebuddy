@@ -17,7 +17,7 @@ import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.homebuddy.core.auth.SessionState
-import chat.homebuddy.core.designsystem.HomeBuddyTheme
+import chat.homebuddy.designsystem.HomeBuddyTheme
 import chat.homebuddy.feature.account.UpdateRequiredScreen
 import chat.homebuddy.feature.auth.SessionViewModel
 import chat.homebuddy.feature.auth.SignInScreen

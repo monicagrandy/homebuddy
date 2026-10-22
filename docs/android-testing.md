@@ -9,9 +9,7 @@ Each rung only after the one before it passes.
 1. **Backend:** `pytest -q` (plus `PG_TEST_URL=… pytest -q tests/test_migrations.py`).
 2. **Android:** from `android/`:
    ```bash
-   ./gradlew testDevDebugUnitTest :core:network:testDebugUnitTest :core:auth:testDebugUnitTest :core:data:testDebugUnitTest \
-     :feature:auth:testDebugUnitTest :feature:home:testDebugUnitTest :feature:documents:testDebugUnitTest \
-     :feature:chat:testDebugUnitTest :feature:account:testDebugUnitTest verifyRoborazziDebug lintDevDebug
+   ./gradlew :core:testDebugUnitTest :app:testDevDebugUnitTest :app:verifyRoborazziDevDebug lintDevDebug
    ```
 3. **Your phone against your laptop:** the `devDebug` build with the backend running locally (see `android/README.md`). Work through the checklist below.
 4. **Deployed backend:** deploy, then run the smoke test (next section). Then a manual web check: sign in, upload, ask.
