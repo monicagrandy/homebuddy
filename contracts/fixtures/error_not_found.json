@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/documents/jobs/missing-job",
+    "query": null
+  },
+  "status": 404,
+  "body": {
+    "detail": "Job not found."
+  }
+}

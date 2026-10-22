@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/query",
+    "query": null
+  },
+  "status": 429,
+  "body": {
+    "detail": "Too many requests. Please wait a moment and try again."
+  },
+  "headers": {
+    "retry-after": "60"
+  }
+}

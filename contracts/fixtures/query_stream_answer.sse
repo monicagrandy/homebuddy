@@ -1,0 +1,10 @@
+data: {"v": 1, "type": "user_accepted", "sanitized_query": "How do I clean the dishwasher filter?", "input_blocked": false, "conversation_id": "thread-2"}
+
+data: {"v": 1, "type": "status", "message": "\ud83e\udded Routing complete: document_qa_agent"}
+
+data: {"v": 1, "type": "status", "message": "\ud83d\udcda Document agent checked the saved docs and finished its pass."}
+
+data: {"v": 1, "type": "status", "message": "\u2728 Final response is ready."}
+
+data: {"v": 1, "type": "final", "result": {"answer": "Twist the filter counterclockwise, lift it out and rinse it under warm water (Bosch Dishwasher Manual, page 12).", "query": "How do I clean the dishwasher filter?", "sanitized_query": "How do I clean the dishwasher filter?", "input_blocked": false, "route": ["document_qa_agent"], "route_confidence": 0.92, "route_explanation": "Manual troubleshooting request", "urgency_level": "low", "should_escalate": false, "case_draft": null, "task_draft": null, "contractor_suggestions": [], "retrieval_context": [], "sources": [{"entry_id": "bosch-dishwasher-manual", "display_name": "Bosch Dishwasher Manual", "page": 12, "doc_type": "manual", "url": null}]}}
+

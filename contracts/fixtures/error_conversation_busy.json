@@ -1,0 +1,11 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/query",
+    "query": null
+  },
+  "status": 409,
+  "body": {
+    "detail": "Still answering your last question in this conversation. Try again in a moment."
+  }
+}

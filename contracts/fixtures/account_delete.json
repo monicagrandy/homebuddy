@@ -1,0 +1,9 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/me",
+    "query": null
+  },
+  "status": 204,
+  "body": null
+}

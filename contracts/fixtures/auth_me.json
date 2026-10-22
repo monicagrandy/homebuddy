@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/auth/me",
+    "query": null
+  },
+  "status": 200,
+  "body": {
+    "id": 1,
+    "cognito_sub": "contract-user-sub",
+    "email": "pat@example.com",
+    "display_name": "Pat Doe"
+  }
+}

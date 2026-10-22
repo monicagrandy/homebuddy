@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/households",
+    "query": null
+  },
+  "status": 201,
+  "body": {
+    "id": 1,
+    "name": "Elm Street",
+    "zip_code": "80202",
+    "home_type": "single_family",
+    "role": "owner"
+  }
+}

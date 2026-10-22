@@ -1,0 +1,14 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/documents/jobs",
+    "query": null
+  },
+  "status": 422,
+  "body": {
+    "detail": {
+      "code": "not_pdf",
+      "message": "The uploaded file is not a PDF."
+    }
+  }
+}

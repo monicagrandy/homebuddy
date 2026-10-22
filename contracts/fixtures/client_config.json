@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/client-config",
+    "query": null
+  },
+  "status": 200,
+  "body": {
+    "min_supported": {
+      "android": "1.0.0"
+    },
+    "retention_days": 90,
+    "features": {
+      "home_operations": true
+    }
+  }
+}

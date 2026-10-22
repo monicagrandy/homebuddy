@@ -164,6 +164,22 @@ Run pytest:
 pytest -q
 ```
 
+The Postgres migration tests are skipped unless you point them at a server whose user can create databases:
+
+```bash
+PG_TEST_URL=postgresql+psycopg://postgres:postgres@localhost:5432/postgres pytest -q tests/test_migrations.py
+```
+
+### API contract for the native apps
+
+`contracts/openapi.json` and `contracts/fixtures/` (recorded responses and streamed answers) are what the Android app's tests check against. `tests/contract` fails when the API no longer matches them. After an intended API change, regenerate and commit them:
+
+```bash
+python scripts/export_contract.py
+```
+
+The script refuses changes that would break apps already installed, such as a removed route or field, unless you pass `--allow-breaking`.
+
 Run all local eval suites:
 
 ```bash

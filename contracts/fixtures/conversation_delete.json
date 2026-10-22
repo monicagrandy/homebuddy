@@ -1,0 +1,9 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/conversations/thread-2",
+    "query": "household_id=1"
+  },
+  "status": 204,
+  "body": null
+}

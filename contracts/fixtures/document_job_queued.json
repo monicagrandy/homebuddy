@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/documents/jobs",
+    "query": null
+  },
+  "status": 202,
+  "body": {
+    "job_id": "00000000-0000-0000-0000-000000000001",
+    "entry_id": "bosch-dishwasher-manual",
+    "status": "queued",
+    "duplicate_of": null,
+    "error_code": null,
+    "error": null,
+    "chunks_indexed": null,
+    "attempts": 0
+  }
+}

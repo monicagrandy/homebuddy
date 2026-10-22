@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/query",
+    "query": null
+  },
+  "status": 200,
+  "body": {
+    "answer": "Twist the filter counterclockwise, lift it out and rinse it under warm water (Bosch Dishwasher Manual, page 12).",
+    "steps": [],
+    "route": [
+      "document_qa_agent"
+    ],
+    "route_confidence": 0.92,
+    "route_explanation": "Manual troubleshooting request",
+    "retrieval_context": [],
+    "urgency_level": "low",
+    "should_escalate": false,
+    "case_draft": null,
+    "task_draft": null,
+    "contractor_suggestions": [],
+    "sources": [
+      {
+        "entry_id": "bosch-dishwasher-manual",
+        "display_name": "Bosch Dishwasher Manual",
+        "page": 12,
+        "doc_type": "manual",
+        "url": null
+      }
+    ]
+  }
+}

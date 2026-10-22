@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/documents",
+    "query": "household_id=1"
+  },
+  "status": 200,
+  "body": [
+    {
+      "id": 1,
+      "entry_id": "bosch-dishwasher-manual",
+      "display_name": "Bosch Dishwasher Manual",
+      "download_url": null,
+      "doc_type": "manual",
+      "uploaded_at": "2026-01-01T00:00:00Z",
+      "status": "indexing"
+    }
+  ]
+}

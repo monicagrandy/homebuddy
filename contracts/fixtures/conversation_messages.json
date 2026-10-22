@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/conversations/thread-1/messages",
+    "query": "household_id=1"
+  },
+  "status": 200,
+  "body": [
+    {
+      "id": 1,
+      "household_id": 1,
+      "session_id": "thread-1",
+      "role": "user",
+      "content": "How do I clean the dishwasher filter?",
+      "created_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "id": 2,
+      "household_id": 1,
+      "session_id": "thread-1",
+      "role": "assistant",
+      "content": "Twist the filter counterclockwise, lift it out and rinse it under warm water (Bosch Dishwasher Manual, page 12).",
+      "created_at": "2026-01-01T00:00:00Z"
+    }
+  ]
+}
