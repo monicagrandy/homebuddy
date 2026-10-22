@@ -5,7 +5,10 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class CitationOut(BaseModel):
-    source: str
+    """A saved document an answer drew on, so clients can show and open it."""
+
+    entry_id: str
+    display_name: str
     page: Optional[int] = None
     doc_type: Optional[str] = None
     url: Optional[str] = None
@@ -45,7 +48,7 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     answer: str
-    steps: list[str] = Field(default_factory=list)
+    steps: list[str] = Field(default_factory=list, deprecated=True)
     route: list[str] = Field(default_factory=list)
     route_confidence: float = 0.0
     route_explanation: Optional[str] = None
@@ -55,6 +58,7 @@ class QueryResponse(BaseModel):
     case_draft: Optional[CaseDraft] = None
     task_draft: Optional[TaskDraft] = None
     contractor_suggestions: list[ContractorSuggestion] = Field(default_factory=list)
+    sources: list[CitationOut] = Field(default_factory=list)
 
 class DocumentIndexResponse(BaseModel):
     entry_id: str

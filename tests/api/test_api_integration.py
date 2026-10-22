@@ -539,23 +539,29 @@ def test_streaming_query_emits_token_events_and_persists_final_turn(client: Test
     ]
     assert [api.json.loads(item) for item in sse_events] == [
         {
+            "v": 1,
             "type": "user_accepted",
             "sanitized_query": "How do I clean the dishwasher?",
             "input_blocked": False,
+            "conversation_id": "session-stream-1",
         },
         {
+            "v": 1,
             "type": "status",
             "message": "🧭 Routing complete: document_qa_agent",
         },
         {
+            "v": 1,
             "type": "token",
             "text": "Clean ",
         },
         {
+            "v": 1,
             "type": "token",
             "text": "the filter.",
         },
         {
+            "v": 1,
             "type": "final",
             "result": {
                 "answer": "Clean the filter.",
@@ -571,6 +577,7 @@ def test_streaming_query_emits_token_events_and_persists_final_turn(client: Test
                 "task_draft": None,
                 "contractor_suggestions": [],
                 "retrieval_context": [],
+                "sources": [],
             },
         },
     ]

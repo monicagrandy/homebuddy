@@ -104,6 +104,9 @@ class HomeBuddyState(TypedDict):
 
     retrieval_context: Annotated[list[str], agent_results_reducer]
 
+    # Structured {entry_id, source, page, doc_type} for each retrieved chunk, behind the sources clients show
+    retrieval_sources: Annotated[list[dict], agent_results_reducer]
+
     # Response from order agent
     # Uses custom agent_results_reducer to allow resetting stale results
     safety_response: Annotated[list[dict], agent_results_reducer]

@@ -65,7 +65,7 @@ def test_unexpected_stream_errors_hide_internal_details(client: TestClient):
     )
 
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
-    assert events[-1] == {"type": "error", "message": "Something went wrong while answering. Please try again."}
+    assert events[-1] == {"v": 1, "type": "error", "message": "Something went wrong while answering. Please try again."}
     assert "hunter2" not in response.text
     with client.testing_session_local() as session:
         saved = [message.content for message in session.query(ConversationMessage).all()]

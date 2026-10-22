@@ -42,7 +42,9 @@ class QueryService:
             "case_draft": result.get("case_draft"),
             "task_draft": result.get("task_draft"),
             "contractor_suggestions": result.get("contractor_suggestions", []),
-            "retrieval_context": result.get("retrieval_context", [])
+            "retrieval_context": result.get("retrieval_context", []),
+            # Raw chunk sources; the API resolves them to documents (CitationOut).
+            "sources": result.get("retrieval_sources", []),
         }
 
     def _build_initial_state(
@@ -246,6 +248,7 @@ class QueryService:
                 "task_draft": None,
                 "contractor_suggestions": [],
                 "retrieval_context": [],
+                "sources": [],
             }
 
         yield {"type": "final", "result": final_payload}

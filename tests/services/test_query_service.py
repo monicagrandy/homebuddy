@@ -159,7 +159,8 @@ def test_to_query_response_uses_safe_defaults():
         "case_draft": None,
         "task_draft": None,
         "contractor_suggestions": [],
-        "retrieval_context": []
+        "retrieval_context": [],
+        "sources": []
     }
 
 
@@ -216,6 +217,7 @@ def test_stream_query_emits_statuses_tokens_and_final_payload():
                 "task_draft": None,
                 "contractor_suggestions": [],
                 "retrieval_context": [],
+                "sources": [],
             },
         },
     ]

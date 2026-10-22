@@ -1,5 +1,6 @@
 import asyncio
 import json
+import queue
 import secrets
 import threading
 from contextlib import asynccontextmanager
@@ -84,6 +85,11 @@ _TEMPORARY_LLM_OVERLOAD_MESSAGE = (
     "HomeBuddy is temporarily busy handling AI requests. Please try again in a few seconds."
 )
 _DISCONNECT_POLL_SECONDS = 0.5
+# Comment lines keep phones, proxies and load balancers from closing a quiet stream.
+_SSE_PING_SECONDS = 15.0
+# Bumped when a streamed event changes shape in a way clients must handle.
+_STREAM_EVENT_VERSION = 1
+_STREAM_DONE = object()
 # nginx's "client closed request" code; the caller is gone, so it is only seen in logs.
 _CLIENT_CLOSED_REQUEST = 499
 
@@ -298,6 +304,46 @@ def _list_household_entities_for_member(
     return session.scalars(
         select(entity).where(entity.household_id == household_id).order_by(entity.id)
     ).all()
+
+
+def _resolve_sources(session: Session, *, household_id: int, raw_sources: list[dict]) -> list[dict]:
+    """Turn retrieved chunk sources into one CitationOut per (document, page), in retrieval order."""
+    seen: set[tuple[str, int | None]] = set()
+    ordered: list[dict] = []
+    for raw in raw_sources:
+        key = (raw.get("entry_id"), raw.get("page"))
+        if not key[0] or key in seen:
+            continue
+        seen.add(key)
+        ordered.append(raw)
+    if not ordered:
+        return []
+
+    documents = {
+        document.entry_id: document
+        for document in session.scalars(
+            select(Document).where(
+                Document.household_id == household_id,
+                Document.entry_id.in_({raw["entry_id"] for raw in ordered}),
+            )
+        )
+    }
+    citations = []
+    for raw in ordered:
+        document = documents.get(raw["entry_id"])
+        if document is None:
+            # Deleted since it was indexed (for example from another device).
+            continue
+        citations.append(
+            {
+                "entry_id": document.entry_id,
+                "display_name": document.source_name,
+                "page": raw.get("page"),
+                "doc_type": raw.get("doc_type") or document.doc_type,
+                "url": document.source_url,
+            }
+        )
+    return citations
 
 
 def _load_conversation_history(
@@ -932,6 +978,14 @@ def query(
                 household_zip_code=payload.household_zip_code,
                 messages=prior_messages,
             )
+        result = {
+            **result,
+            "sources": _resolve_sources(
+                session,
+                household_id=payload.household_id,
+                raw_sources=result.get("sources", []),
+            ),
+        }
         # Persist the PII-anonymized query, not the raw one, and skip blocked turns entirely.
         if not result.get("input_blocked"):
             _append_conversation_message(
@@ -988,23 +1042,35 @@ def query_stream(
         streamed=True,
     )
 
-    def event_stream():
-        final_result = None
+    conversation_id = payload.session_id
+
+    def save_reply(persist_session: Session, content: str) -> None:
+        _append_conversation_message(
+            persist_session,
+            household_id=payload.household_id,
+            session_id=payload.session_id,
+            role="assistant",
+            content=content,
+        )
+
+    def produce(emit) -> None:
+        """Run the graph to completion and save the turn, whether or not the client is still listening."""
         sanitized_query = None
-        with SessionLocal() as persist_session:
+        with SessionLocal() as persist_session, tracing_context(tags=trace_tags, metadata=trace_metadata):
             try:
-                with tracing_context(tags=trace_tags, metadata=trace_metadata):
-                    for event in service.stream_query(
-                        user_query=payload.question,
-                        user_id=user.id,
-                        session_id=payload.session_id,
-                        entry_id=payload.entry_id,
-                        household_id=payload.household_id,
-                        asset_id=payload.asset_id,
-                        household_zip_code=payload.household_zip_code,
-                        messages=prior_messages,
-                    ):
-                        if not sanitized_query and event.get("type") == "user_accepted" and event.get("sanitized_query") is not None:
+                for event in service.stream_query(
+                    user_query=payload.question,
+                    user_id=user.id,
+                    session_id=payload.session_id,
+                    entry_id=payload.entry_id,
+                    household_id=payload.household_id,
+                    asset_id=payload.asset_id,
+                    household_zip_code=payload.household_zip_code,
+                    messages=prior_messages,
+                ):
+                    if event.get("type") == "user_accepted":
+                        event = {**event, "conversation_id": conversation_id}
+                        if not sanitized_query and event.get("sanitized_query") is not None:
                             sanitized_query = event["sanitized_query"]
                             _append_conversation_message(
                                 persist_session,
@@ -1013,68 +1079,61 @@ def query_stream(
                                 role="user",
                                 content=sanitized_query,
                             )
-                        if event.get("type") == "final":
-                            final_result = event["result"]
-                            _append_conversation_message(
+                    if event.get("type") == "final":
+                        result = {
+                            **event["result"],
+                            "sources": _resolve_sources(
                                 persist_session,
                                 household_id=payload.household_id,
-                                session_id=payload.session_id,
-                                role="assistant",
-                                content=final_result["answer"],
-                            )
-                        yield f"data: {json.dumps(jsonable_encoder(event))}\n\n"
-            except ValueError as exc:
+                                raw_sources=event["result"].get("sources", []),
+                            ),
+                        }
+                        event = {**event, "result": result}
+                        save_reply(persist_session, result["answer"])
+                    emit(event)
+            except (ValueError, SafetyBlockError, QueryEngineError) as exc:
                 message = _streaming_query_error_message(exc)
-                _append_conversation_message(
-                    persist_session,
-                    household_id=payload.household_id,
-                    session_id=payload.session_id,
-                    role="assistant",
-                    content=message,
-                )
-                yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
-            except SafetyBlockError as exc:
-                message = _streaming_query_error_message(exc)
-                _append_conversation_message(
-                    persist_session,
-                    household_id=payload.household_id,
-                    session_id=payload.session_id,
-                    role="assistant",
-                    content=message,
-                )
-                yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
-            except QueryEngineError as exc:
-                message = _streaming_query_error_message(exc)
-                _append_conversation_message(
-                    persist_session,
-                    household_id=payload.household_id,
-                    session_id=payload.session_id,
-                    role="assistant",
-                    content=message,
-                )
-                yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
+                save_reply(persist_session, message)
+                emit({"type": "error", "message": message})
             except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
-                message = _streaming_query_error_message(exc)
-                _append_conversation_message(
-                    persist_session,
-                    household_id=payload.household_id,
-                    session_id=payload.session_id,
-                    role="assistant",
-                    content=message,
-                )
                 logger.warning("Streaming query hit temporary AI provider error: %s", exc)
-                yield f"data: {json.dumps({'type': 'error', 'message': message})}\n\n"
+                message = _streaming_query_error_message(exc)
+                save_reply(persist_session, message)
+                emit({"type": "error", "message": message})
             except Exception:
                 # Unexpected errors can carry internal details, so the client only gets a generic message.
-                _append_conversation_message(
-                    persist_session,
-                    household_id=payload.household_id,
-                    session_id=payload.session_id,
-                    role="assistant",
-                    content=_UNEXPECTED_QUERY_ERROR_MESSAGE,
-                )
                 logger.exception("Streaming query failed")
-                yield f"data: {json.dumps({'type': 'error', 'message': _UNEXPECTED_QUERY_ERROR_MESSAGE})}\n\n"
-               
+                save_reply(persist_session, _UNEXPECTED_QUERY_ERROR_MESSAGE)
+                emit({"type": "error", "message": _UNEXPECTED_QUERY_ERROR_MESSAGE})
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    events: queue.Queue = queue.Queue()
+
+    def run_producer() -> None:
+        try:
+            produce(events.put)
+        except Exception:
+            logger.exception("Streaming query could not save its result")
+            events.put({"type": "error", "message": _UNEXPECTED_QUERY_ERROR_MESSAGE})
+        finally:
+            events.put(_STREAM_DONE)
+
+    # The graph runs in its own thread so a dropped connection (a phone backgrounding the app)
+    # never cuts the answer short; the client can fetch it from the conversation afterwards.
+    threading.Thread(target=run_producer, name="query-stream", daemon=True).start()
+
+    def event_stream():
+        while True:
+            try:
+                item = events.get(timeout=_SSE_PING_SECONDS)
+            except queue.Empty:
+                yield ": ping\n\n"
+                continue
+            if item is _STREAM_DONE:
+                return
+            yield f"data: {json.dumps(jsonable_encoder({'v': _STREAM_EVENT_VERSION, **item}))}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

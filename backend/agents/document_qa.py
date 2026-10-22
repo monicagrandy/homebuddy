@@ -91,6 +91,16 @@ def _format_retrieval_matches(matches: list[dict], *, empty_message: str) -> str
     return "\n\n".join(parts)
 
 
+def _source_from_match(match: dict) -> dict:
+    meta = match["metadata"]
+    return {
+        "entry_id": meta.get("entry_id"),
+        "source": meta.get("source"),
+        "page": meta.get("page"),
+        "doc_type": meta.get("doc_type"),
+    }
+
+
 def _build_retrieval_query(user_query: str, task_desc: str | None) -> str:
     normalized_task = (task_desc or "").strip()
     lowered_task = normalized_task.lower()
@@ -155,6 +165,7 @@ def _document_qa_agent_node(
             }
         ],
         "retrieval_context": retrieval_context,
+        "retrieval_sources": [_source_from_match(match) for match in local_matches],
     }
     return finalize_or_synthesize(state=state, answer=answer, update=update)
 
