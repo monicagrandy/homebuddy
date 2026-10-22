@@ -59,9 +59,10 @@ fun HomeSetupScreen(state: HomeSetupUiState, onSubmit: (HomeDetails) -> Unit, mo
     var name by rememberSaveable { mutableStateOf("") }
     var zip by rememberSaveable { mutableStateOf("") }
     var type by rememberSaveable { mutableStateOf(HOME_TYPES.first().first) }
-    var submitted by rememberSaveable { mutableStateOf(false) }
+    // Field errors only show after the first tap on Continue, not while someone is still typing.
+    var showErrors by rememberSaveable { mutableStateOf(false) }
     val details = HomeDetails(name, zip, type)
-    val problems = if (submitted) details.problems() else emptyMap()
+    val problems = if (showErrors) details.problems() else emptyMap()
 
     Surface(modifier = modifier.fillMaxSize()) {
         Column(
@@ -114,8 +115,7 @@ fun HomeSetupScreen(state: HomeSetupUiState, onSubmit: (HomeDetails) -> Unit, mo
             } else {
                 Button(
                     onClick = {
-                        // TODO: Not used
-                        submitted = true
+                        showErrors = true
                         if (details.problems().isEmpty()) onSubmit(details.copy(name = name.trim(), zipCode = zip.trim()))
                     },
                     modifier = Modifier.fillMaxWidth(),

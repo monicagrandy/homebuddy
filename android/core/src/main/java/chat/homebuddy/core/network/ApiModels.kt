@@ -36,13 +36,6 @@ data class HouseholdCreateRequest(
 )
 
 @Serializable
-data class ClientConfigDto(
-    @SerialName("min_supported") val minSupported: Map<String, String>,
-    @SerialName("retention_days") val retentionDays: Int,
-    val features: Map<String, Boolean> = emptyMap(),
-)
-
-@Serializable
 data class DocumentDto(
     val id: Int,
     @SerialName("entry_id") val entryId: String,

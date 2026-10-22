@@ -27,10 +27,6 @@ interface HomeBuddyApi {
     @POST("households")
     suspend fun createHousehold(@Body body: HouseholdCreateRequest): HouseholdDto
 
-    /** Public: read at startup to decide whether this app version is still supported. */
-    @GET("client-config")
-    suspend fun clientConfig(): ClientConfigDto
-
     @GET("documents")
     suspend fun documents(@Query("household_id") householdId: Int): List<DocumentDto>
 

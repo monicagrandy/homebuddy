@@ -39,14 +39,6 @@ class ContractFixturesTest {
     }
 
     @Test
-    fun `client config decodes`() {
-        val config = HomeBuddyJson.decodeFromJsonElement(ClientConfigDto.serializer(), body("client_config.json"))
-
-        assertEquals("1.0.0", config.minSupported["android"])
-        assertEquals(90, config.retentionDays)
-    }
-
-    @Test
     fun `a plain error message is read from detail`() {
         val error = parseApiError(status("error_conversation_busy.json"), body("error_conversation_busy.json").toString())
 

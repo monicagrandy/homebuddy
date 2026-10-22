@@ -63,8 +63,13 @@ class ConversationsRepository(
         dao.delete(conversationId)
     }
 
-    /** Streams an answer; afterwards the thread is refreshed from the server, which saved both sides. */
-    // TODO: why is this not a suspend function? Won't this execute and block the main thread?
+    /**
+     * Streams an answer; afterwards the thread is refreshed from the server, which saved both sides.
+     *
+     * Not a suspend function because it returns a cold Flow, and making one does no work. The
+     * request starts when the caller collects it and runs on OkHttp's threads, so collecting on
+     * the main thread never blocks it.
+     */
     fun ask(householdId: Int, conversationId: String, question: String, zipCode: String?): Flow<StreamEvent> =
         streams.stream(QueryRequestDto(question = question, sessionId = conversationId, householdId = householdId, householdZipCode = zipCode))
 

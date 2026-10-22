@@ -22,13 +22,18 @@ class ApiException(val error: ApiError) : IOException(error.message)
  * Streams an answer. Events arrive in order and the flow ends after the server closes the
  * stream. Cancelling the collector cancels the HTTP call; the server still finishes the answer
  * and saves it in the conversation.
+ *
+ * Each question is its own request: the backend answers a POST to /query/stream with one SSE
+ * response and closes it when the answer is done. Keeping a connection open for the whole session
+ * would need a different protocol on the server (WebSockets) for no gain, since nothing is sent
+ * between questions, and Android doesn't keep sockets alive in the background anyway. Pushing
+ * news between questions, such as "your document is ready", is a job for FCM later.
  */
 class QueryStreamClient(
     private val client: OkHttpClient,
     private val config: ApiConfig,
     private val json: Json = HomeBuddyJson,
 ) {
-    //TODO: Why open/close a new stream per request instead of opening once at the beginning of the session and closing when the app leaves the foreground?
     fun stream(request: QueryRequestDto): Flow<StreamEvent> = callbackFlow {
         val call = client.newCall(
             Request.Builder()

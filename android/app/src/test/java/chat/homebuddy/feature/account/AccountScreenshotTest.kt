@@ -45,6 +45,4 @@ class AccountScreenshotTest {
         )
     }
 
-    @Test
-    fun updateRequired() = capture("update_required") { UpdateRequiredScreen(onUpdate = {}) }
 }

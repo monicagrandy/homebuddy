@@ -124,9 +124,9 @@ class AuthenticatedClientTest {
     @Test
     fun `without a session no Authorization header is sent`() = runTest {
         tokens.current = null
-        server.enqueue(ok("""{"min_supported": {"android": "1.0.0"}, "retention_days": 90, "features": {}}"""))
+        server.enqueue(ok(households))
 
-        api.clientConfig()
+        api.households()
 
         assertNull(server.takeRequest().getHeader("Authorization"))
     }

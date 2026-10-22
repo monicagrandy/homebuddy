@@ -54,8 +54,4 @@ object DataModule {
     @Singleton
     fun conversationsRepository(api: HomeBuddyApi, streams: QueryStreamClient, database: HomeBuddyDatabase): ConversationsRepository =
         ConversationsRepository(api, streams, database.conversations())
-
-    @Provides
-    @Singleton
-    fun clientConfigRepository(api: HomeBuddyApi): ClientConfigRepository = ClientConfigRepository(api)
 }

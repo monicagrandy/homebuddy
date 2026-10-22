@@ -19,7 +19,6 @@ import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.homebuddy.designsystem.HomeBuddyTheme
-import chat.homebuddy.feature.account.UpdateRequiredScreen
 import chat.homebuddy.feature.auth.AppUiState
 import chat.homebuddy.feature.auth.SessionViewModel
 import chat.homebuddy.feature.auth.SignInScreen
@@ -89,11 +88,9 @@ private fun HomeBuddyRoot(
     pendingShare: DocumentsDestination?,
     onShareOpened: () -> Unit,
     viewModel: SessionViewModel = hiltViewModel(),
-    app: AppViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val logoutUrl by viewModel.pendingLogoutUrl.collectAsStateWithLifecycle()
-    val mustUpdate by app.mustUpdate.collectAsStateWithLifecycle()
     val signIn = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         viewModel.onSignInResult(result.data)
     }
@@ -105,18 +102,9 @@ private fun HomeBuddyRoot(
         }
     }
 
-    if (mustUpdate) {
-        UpdateRequiredScreen(onUpdate = { context.startActivity(playStoreIntent(context.packageName)) })
-        return
-    }
-
     when (val current = state) {
         AppUiState.Main -> MainScaffold(share = pendingShare, onShareOpened = onShareOpened, onSignOut = viewModel::onSignOutClick)
         AppUiState.HomeSetup -> HomeSetupRoute()
         is AppUiState.SignIn -> SignInScreen(current.screen, onSignIn = { viewModel.onSignInClick()?.let(signIn::launch) })
     }
 }
-
-/** The app's Play Store page (opens in the Play Store app when it's installed, the browser otherwise). */
-private fun playStoreIntent(packageName: String): Intent =
-    Intent(Intent.ACTION_VIEW, "https://play.google.com/store/apps/details?id=$packageName".toUri())
