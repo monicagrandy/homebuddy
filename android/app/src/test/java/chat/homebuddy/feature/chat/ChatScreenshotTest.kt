@@ -6,8 +6,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.Density
-import chat.homebuddy.designsystem.HomeBuddyTheme
+import chat.homebuddy.app.R
 import chat.homebuddy.core.network.SourceDto
+import chat.homebuddy.designsystem.HomeBuddyTheme
+import chat.homebuddy.designsystem.asUiText
+import chat.homebuddy.designsystem.uiText
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
@@ -48,9 +51,9 @@ class ChatScreenshotTest {
     private val conversations = ConversationListUiState(
         loaded = true,
         items = listOf(
-            ConversationItem("1", "How do I clean the dishwasher filter?", "Today, 9:05 AM"),
-            ConversationItem("2", "Is my furnace still under warranty?", "Oct 19"),
-            ConversationItem("3", "What does error E15 mean on the Bosch dishwasher? It flashes after every cycle", "Sep 30"),
+            ConversationItem("1", "How do I clean the dishwasher filter?", uiText(R.string.chat_updated_today, "9:05 AM")),
+            ConversationItem("2", "Is my furnace still under warranty?", "Oct 19".asUiText()),
+            ConversationItem("3", "What does error E15 mean on the Bosch dishwasher? It flashes after every cycle", "Sep 30".asUiText()),
         ),
     )
 
@@ -65,7 +68,7 @@ class ChatScreenshotTest {
         ConversationScreen(
             ConversationUiState(
                 title = "How do I clean the dishwasher filter?",
-                turns = listOf(ChatTurn("How do I clean the dishwasher filter?", status = "Document agent checked the saved docs and finished its pass.")),
+                turns = listOf(ChatTurn("How do I clean the dishwasher filter?", status = "Document agent checked the saved docs and finished its pass.".asUiText())),
             ),
             ConversationActions(),
         )
@@ -108,7 +111,7 @@ class ChatScreenshotTest {
             ConversationUiState(
                 title = "Is my furnace still under warranty?",
                 draft = "Are you there?",
-                message = "Still answering your last question in this conversation. Try again in a moment.",
+                message = "Still answering your last question in this conversation. Try again in a moment.".asUiText(),
             ),
             ConversationActions(),
         )

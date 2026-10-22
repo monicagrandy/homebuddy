@@ -36,6 +36,8 @@ Two modules, so the one boundary that matters is enforced: screens can't reach D
 
 Each feature declares its typed Navigation Compose destinations next to its screens (`ChatNavigation.kt`, `DocumentsNavigation.kt`, `AccountNavigation.kt`), and `MainScaffold` puts them in one `NavHost` with a bottom bar. Signing in and setting up a home aren't destinations: which of those shows follows the stored session.
 
+UI text lives in `app/src/main/res/values/strings.xml`. ViewModels hand screens a `UiText` (a string resource, or a server message shown as is) and never read resources themselves.
+
 ## Sign-in and devices
 
 - Sign-in uses Cognito's hosted UI in a Custom Tab (auth code + PKCE).

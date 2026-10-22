@@ -1,8 +1,11 @@
 package chat.homebuddy.feature.documents
 
+import chat.homebuddy.app.R
 import chat.homebuddy.core.data.DocumentEntity
 import chat.homebuddy.core.data.UploadEntity
 import chat.homebuddy.core.data.UploadState
+import chat.homebuddy.designsystem.asUiText
+import chat.homebuddy.designsystem.uiText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -19,14 +22,14 @@ class DocumentsUiStateTest {
         assertEquals(UploadStatus.WAITING, upload(UploadState.QUEUED).toItem().status)
         assertEquals(UploadStatus.UPLOADING, upload(UploadState.UPLOADING).toItem().status)
         assertEquals(UploadStatus.READING, upload(UploadState.INDEXING).toItem().status)
-        assertEquals("Already in your documents.", upload(UploadState.DUPLICATE).toItem().message)
+        assertEquals(uiText(R.string.documents_duplicate), upload(UploadState.DUPLICATE).toItem().message)
     }
 
     @Test
     fun `a link that was a web page offers to open it instead of retrying`() {
         val item = upload(UploadState.FAILED, url = "https://example.com/support", errorCode = "not_pdf").toItem()
 
-        assertEquals(NOT_A_PDF_LINK, item.message)
+        assertEquals(uiText(R.string.documents_not_a_pdf_link), item.message)
         assertEquals("https://example.com/support", item.openUrl)
     }
 
@@ -34,7 +37,7 @@ class DocumentsUiStateTest {
     fun `other failures show the server's explanation`() {
         val item = upload(UploadState.FAILED, errorCode = "no_text", errorMessage = "This PDF has no readable text (it may be a scan).").toItem()
 
-        assertEquals("This PDF has no readable text (it may be a scan).", item.message)
+        assertEquals("This PDF has no readable text (it may be a scan).".asUiText(), item.message)
         assertNull(item.openUrl)
     }
 

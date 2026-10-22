@@ -1,12 +1,14 @@
 package chat.homebuddy.feature.auth
 
-import chat.homebuddy.designsystem.HomeBuddyTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.Density
+import chat.homebuddy.app.R
+import chat.homebuddy.designsystem.HomeBuddyTheme
+import chat.homebuddy.designsystem.uiText
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
@@ -40,7 +42,7 @@ class SignInScreenScreenshotTest {
 
     @Test
     fun signedOutElsewhere() = capture("sign_in_signed_out_message") {
-        SignInScreen(SignInUiState.Idle("You've been signed out. Please sign in again."), onSignIn = {})
+        SignInScreen(SignInUiState.Idle(uiText(R.string.sign_in_session_ended)), onSignIn = {})
     }
 
     @Test
@@ -52,17 +54,17 @@ class SignInScreenScreenshotTest {
 
     @Test
     fun error() = capture("sign_in_error") {
-        SignInScreen(SignInUiState.Error("Couldn't reach Home Buddy. Check your connection and try again."), onSignIn = {})
+        SignInScreen(SignInUiState.Error(uiText(R.string.error_offline)), onSignIn = {})
     }
 
     @Test
     fun errorDark() = capture("sign_in_error_dark", dark = true) {
-        SignInScreen(SignInUiState.Error("This account isn't part of the Home Buddy beta yet."), onSignIn = {})
+        SignInScreen(SignInUiState.Error(uiText(R.string.sign_in_not_in_beta)), onSignIn = {})
     }
 
     @Test
     fun largestFont() = capture("sign_in_font_200", fontScale = 2f) {
-        SignInScreen(SignInUiState.Error("Couldn't reach Home Buddy. Check your connection and try again."), onSignIn = {})
+        SignInScreen(SignInUiState.Error(uiText(R.string.error_offline)), onSignIn = {})
     }
 
     @Test

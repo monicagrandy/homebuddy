@@ -4,10 +4,14 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import chat.homebuddy.app.R
 import chat.homebuddy.core.data.DocumentsRepository
 import chat.homebuddy.core.data.UploadFiles
 import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
 import chat.homebuddy.core.network.toApiError
+import chat.homebuddy.designsystem.UiText
+import chat.homebuddy.designsystem.asUiText
+import chat.homebuddy.designsystem.uiText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
@@ -42,7 +46,7 @@ class DocumentsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val refreshing = MutableStateFlow(false)
-    private val message = MutableStateFlow<String?>(null)
+    private val message = MutableStateFlow<UiText?>(null)
 
     val state: StateFlow<DocumentsUiState> = householdId
         .flatMapLatest { id ->
@@ -63,7 +67,7 @@ class DocumentsViewModel @Inject constructor(
             } catch (_: IOException) {
                 // Offline: keep showing the cached list.
             } catch (error: HttpException) {
-                message.value = error.toApiError().message
+                message.value = error.toApiError().message.asUiText()
             } finally {
                 refreshing.value = false
             }
@@ -77,11 +81,11 @@ class DocumentsViewModel @Inject constructor(
                 repository.addFile(id, name, input)
             }
         } catch (_: UploadFiles.FileTooLarge) {
-            message.value = "That PDF is larger than 50 MB."
+            message.value = uiText(R.string.documents_too_large)
         } catch (_: IOException) {
-            message.value = "Couldn't read that file."
+            message.value = uiText(R.string.documents_unreadable)
         } catch (_: SecurityException) {
-            message.value = "Couldn't read that file."
+            message.value = uiText(R.string.documents_unreadable)
         }
     }
 
@@ -91,9 +95,9 @@ class DocumentsViewModel @Inject constructor(
         try {
             repository.delete(id, document.entryId)
         } catch (_: IOException) {
-            message.value = "Couldn't reach Home Buddy to delete it. Try again when you're online."
+            message.value = uiText(R.string.documents_delete_offline)
         } catch (error: HttpException) {
-            message.value = error.toApiError().message
+            message.value = error.toApiError().message.asUiText()
         }
     }
 
@@ -109,13 +113,14 @@ class DocumentsViewModel @Inject constructor(
         message.value = null
     }
 
-    fun displayNameFor(uri: Uri, fallback: String?): String {
+    /** A readable name from the file's name, or null when it has none worth using. */
+    fun displayNameFor(uri: Uri, fallback: String?): String? {
         val fromProvider = runCatching {
             context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
                 if (it.moveToFirst()) it.getString(0) else null
             }
         }.getOrNull()
-        return nameFromFileName(fromProvider ?: fallback) ?: "Manual"
+        return nameFromFileName(fromProvider ?: fallback)
     }
 
     /** Waits for the household when the cached profile hasn't been read yet (right after launch). */

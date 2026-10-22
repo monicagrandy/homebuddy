@@ -1,8 +1,12 @@
 package chat.homebuddy.feature.documents
 
+import chat.homebuddy.app.R
 import chat.homebuddy.core.data.DocumentEntity
 import chat.homebuddy.core.data.UploadEntity
 import chat.homebuddy.core.data.UploadState
+import chat.homebuddy.designsystem.UiText
+import chat.homebuddy.designsystem.asUiText
+import chat.homebuddy.designsystem.uiText
 
 data class DocumentItem(val entryId: String, val name: String, val docType: String, val indexing: Boolean)
 
@@ -12,7 +16,7 @@ data class UploadItem(
     val id: String,
     val name: String,
     val status: UploadStatus,
-    val message: String? = null,
+    val message: UiText? = null,
     /** For a link that turned out to be a web page: open it so the user can find the PDF. */
     val openUrl: String? = null,
 )
@@ -22,13 +26,10 @@ data class DocumentsUiState(
     val uploads: List<UploadItem> = emptyList(),
     val refreshing: Boolean = false,
     val loaded: Boolean = false,
-    val message: String? = null,
+    val message: UiText? = null,
 ) {
     val isEmpty: Boolean get() = loaded && documents.isEmpty() && uploads.isEmpty()
 }
-
-const val NOT_A_PDF_LINK =
-    "This link opens a web page, not a PDF. Open it, find the manual, and share the PDF to Home Buddy."
 
 fun UploadEntity.toItem(): UploadItem = UploadItem(
     id = id,
@@ -41,10 +42,10 @@ fun UploadEntity.toItem(): UploadItem = UploadItem(
         UploadState.DUPLICATE -> UploadStatus.DUPLICATE
     },
     message = when {
-        state == UploadState.DUPLICATE -> "Already in your documents."
+        state == UploadState.DUPLICATE -> uiText(R.string.documents_duplicate)
         state != UploadState.FAILED -> null
-        errorCode == "not_pdf" && url != null -> NOT_A_PDF_LINK
-        else -> errorMessage ?: "The document couldn't be added."
+        errorCode == "not_pdf" && url != null -> uiText(R.string.documents_not_a_pdf_link)
+        else -> errorMessage?.asUiText() ?: uiText(R.string.documents_add_failed)
     },
     openUrl = url?.takeIf { state == UploadState.FAILED && errorCode == "not_pdf" },
 )
@@ -53,7 +54,7 @@ fun UploadEntity.toItem(): UploadItem = UploadItem(
  * The documents list, leaving out ones still shown as an upload in progress, so a new document
  * isn't listed twice while the server reads it.
  */
-fun documentsUiState(documents: List<DocumentEntity>, uploads: List<UploadEntity>, refreshing: Boolean, message: String?) =
+fun documentsUiState(documents: List<DocumentEntity>, uploads: List<UploadEntity>, refreshing: Boolean, message: UiText?) =
     DocumentsUiState(
         documents = documents
             .filterNot { document -> uploads.any { it.state == UploadState.INDEXING && it.entryId == document.entryId } }

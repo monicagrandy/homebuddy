@@ -13,10 +13,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.homebuddy.app.R
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
@@ -40,6 +42,9 @@ fun DocumentsRoute(
     var pending by remember { mutableStateOf<Pending?>(null) }
     var deleting by remember { mutableStateOf<DocumentItem?>(null) }
 
+    val defaultName = stringResource(R.string.documents_default_name)
+    fun nameFor(uri: Uri): String = viewModel.displayNameFor(uri, null) ?: defaultName
+
     // Refresh whenever the screen comes back, so changes made on other devices show up.
     LifecycleResumeEffect(Unit) {
         viewModel.refresh()
@@ -48,7 +53,7 @@ fun DocumentsRoute(
 
     LaunchedEffect(share) {
         pending = when (share) {
-            is SharedDocument.File -> Pending.File(share.uri, viewModel.displayNameFor(share.uri, null))
+            is SharedDocument.File -> Pending.File(share.uri, nameFor(share.uri))
             is SharedDocument.Link -> Pending.Link(share.link)
             null -> return@LaunchedEffect
         }
@@ -56,7 +61,7 @@ fun DocumentsRoute(
     }
 
     val pickPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) pending = Pending.File(uri, viewModel.displayNameFor(uri, null))
+        if (uri != null) pending = Pending.File(uri, nameFor(uri))
     }
 
     fun scanQrCode() {
@@ -66,12 +71,12 @@ fun DocumentsRoute(
             .addOnSuccessListener { barcode ->
                 when (val link = parseManualLink(barcode.rawValue)) {
                     is ManualLink.Valid -> pending = Pending.Link(link)
-                    ManualLink.NotSecure -> Toast.makeText(context, "That QR code uses an insecure link, so it wasn't added.", Toast.LENGTH_LONG).show()
-                    ManualLink.NotALink -> Toast.makeText(context, "That QR code doesn't contain a web link.", Toast.LENGTH_LONG).show()
+                    ManualLink.NotSecure -> Toast.makeText(context, R.string.documents_qr_insecure, Toast.LENGTH_LONG).show()
+                    ManualLink.NotALink -> Toast.makeText(context, R.string.documents_qr_not_a_link, Toast.LENGTH_LONG).show()
                 }
             }
             .addOnFailureListener {
-                Toast.makeText(context, "The QR scanner isn't available on this phone right now.", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, R.string.documents_qr_unavailable, Toast.LENGTH_LONG).show()
             }
     }
 

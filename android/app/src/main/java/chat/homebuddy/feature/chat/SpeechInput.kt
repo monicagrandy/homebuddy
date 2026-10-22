@@ -7,11 +7,13 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import androidx.annotation.StringRes
+import chat.homebuddy.app.R
 
 interface SpeechListener {
     fun onPartial(text: String)
     fun onFinal(text: String)
-    fun onError(message: String)
+    fun onError(@StringRes message: Int)
 }
 
 /**
@@ -34,7 +36,7 @@ class SpeechInput(private val context: Context) {
             if (onDevice()) SpeechRecognizer.createOnDeviceSpeechRecognizer(context) else SpeechRecognizer.createSpeechRecognizer(context)
         }.getOrNull()
         if (created == null) {
-            listener.onError("Voice input isn't available on this phone.")
+            listener.onError(R.string.voice_unavailable)
             return
         }
         recognizer = created
@@ -51,10 +53,10 @@ class SpeechInput(private val context: Context) {
                 override fun onError(error: Int) {
                     listener.onError(
                         when (error) {
-                            SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Didn't catch that. Tap the mic and try again."
-                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Home Buddy needs microphone access for voice input."
-                            SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Voice input needs a connection on this phone."
-                            else -> "Voice input stopped. You can type your question instead."
+                            SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> R.string.voice_no_match
+                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> R.string.voice_needs_permission
+                            SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> R.string.voice_needs_network
+                            else -> R.string.voice_stopped
                         },
                     )
                 }

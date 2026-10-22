@@ -3,6 +3,7 @@ package chat.homebuddy.feature.auth
 import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import chat.homebuddy.app.R
 import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.domain.ObserveSessionUseCase
 import chat.homebuddy.core.domain.RefreshProfileUseCase
@@ -10,6 +11,8 @@ import chat.homebuddy.core.domain.SessionState
 import chat.homebuddy.core.domain.SignInResult
 import chat.homebuddy.core.domain.SignInUseCase
 import chat.homebuddy.core.domain.SignOutUseCase
+import chat.homebuddy.designsystem.UiText
+import chat.homebuddy.designsystem.uiText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,8 +42,8 @@ class SessionViewModel @Inject constructor(
 ) : ViewModel() {
     private val session = observeSession().stateIn(viewModelScope, SharingStarted.Eagerly, SessionState.Loading)
     private val signingIn = MutableStateFlow(false)
-    private val signInError = MutableStateFlow<String?>(null)
-    private val profileError = MutableStateFlow<String?>(null)
+    private val signInError = MutableStateFlow<UiText?>(null)
+    private val profileError = MutableStateFlow<UiText?>(null)
 
     val state: StateFlow<AppUiState> = combine(session, signingIn, signInError, profileError) { session, signingIn, signInError, profileError ->
         when (session) {
@@ -86,9 +89,9 @@ class SessionViewModel @Inject constructor(
         viewModelScope.launch {
             signInError.value = when (signIn(data)) {
                 SignInResult.SignedIn, SignInResult.Cancelled -> null
-                SignInResult.NotInBeta -> NOT_IN_BETA
-                SignInResult.Offline -> OFFLINE
-                SignInResult.Failed -> SIGN_IN_FAILED
+                SignInResult.NotInBeta -> uiText(R.string.sign_in_not_in_beta)
+                SignInResult.Offline -> uiText(R.string.error_offline)
+                SignInResult.Failed -> uiText(R.string.sign_in_failed)
             }
             signingIn.value = false
         }
@@ -105,21 +108,15 @@ class SessionViewModel @Inject constructor(
     private fun loadProfile() {
         profileError.value = null
         viewModelScope.launch {
-            if (!refreshProfile()) profileError.value = OFFLINE
+            if (!refreshProfile()) profileError.value = uiText(R.string.error_offline)
         }
     }
 
     private companion object {
-        const val SESSION_ENDED = "You've been signed out. Please sign in again."
-        const val ACCOUNT_DELETED = "Your account and its data have been deleted."
-        const val SIGN_IN_FAILED = "Couldn't sign in. Please try again."
-        const val NOT_IN_BETA = "This account isn't part of the Home Buddy beta yet."
-        const val OFFLINE = "Couldn't reach Home Buddy. Check your connection and try again."
-
-        fun SignOutReason.message(): String = when (this) {
-            SignOutReason.SESSION_ENDED -> SESSION_ENDED
-            SignOutReason.ACCOUNT_DELETED -> ACCOUNT_DELETED
-            SignOutReason.NOT_IN_BETA -> NOT_IN_BETA
+        fun SignOutReason.message(): UiText = when (this) {
+            SignOutReason.SESSION_ENDED -> uiText(R.string.sign_in_session_ended)
+            SignOutReason.ACCOUNT_DELETED -> uiText(R.string.sign_in_account_deleted)
+            SignOutReason.NOT_IN_BETA -> uiText(R.string.sign_in_not_in_beta)
         }
     }
 }

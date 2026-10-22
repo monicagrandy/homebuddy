@@ -1,8 +1,11 @@
 package chat.homebuddy.feature.chat
 
+import chat.homebuddy.app.R
 import chat.homebuddy.core.network.QueryResultDto
 import chat.homebuddy.core.network.SourceDto
 import chat.homebuddy.core.network.StreamEvent
+import chat.homebuddy.designsystem.asUiText
+import chat.homebuddy.designsystem.uiText
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
@@ -41,7 +44,7 @@ class ChatTurnsTest {
     @Test
     fun `status lines lose their emoji and stop once text is arriving`() {
         val turn = ChatTurn("q").reduce(StreamEvent.Status("✨ Writing the final response."))
-        assertEquals("Writing the final response.", turn.status)
+        assertEquals("Writing the final response.".asUiText(), turn.status)
 
         val withText = turn.reduce(StreamEvent.Token("Hi")).reduce(StreamEvent.Status("✨ Final response is ready."))
         assertNull(withText.status)
@@ -52,14 +55,14 @@ class ChatTurnsTest {
         val turn = ChatTurn("q").reduce(StreamEvent.Error("Something went wrong while answering. Please try again."))
 
         assertFalse(turn.streaming)
-        assertEquals("Something went wrong while answering. Please try again.", turn.error)
+        assertEquals("Something went wrong while answering. Please try again.".asUiText(), turn.error)
     }
 
     @Test
     fun `a stream that ends without an answer says the connection dropped`() {
         val turn = ChatTurn("q").reduce(StreamEvent.Token("Twist")).finish()
 
-        assertEquals(CONNECTION_DROPPED, turn.error)
+        assertEquals(uiText(R.string.chat_connection_dropped), turn.error)
         assertEquals(turn, turn.finish())
     }
 
@@ -68,7 +71,7 @@ class ChatTurnsTest {
         val stopped = ChatTurn("q").reduce(StreamEvent.Token("Twist")).stop()
 
         assertEquals("Twist", stopped.answer)
-        assertEquals(STOPPED, stopped.note)
+        assertEquals(uiText(R.string.chat_stopped), stopped.note)
         assertFalse(stopped.streaming)
     }
 
@@ -93,10 +96,10 @@ class ChatTurnsTest {
         val denver = ZoneId.of("America/Denver")
         val today = LocalDate.of(2026, 10, 21)
 
-        assertEquals("Today, 9:05 AM", shortDate("2026-10-21T15:05:00+00:00", denver, today))
-        assertEquals("Oct 2", shortDate("2026-10-02T15:05:00Z", denver, today))
-        assertEquals("Dec 30, 2025", shortDate("2025-12-30T15:05:00", denver, today))
-        assertEquals("", shortDate("not a date", denver, today))
+        assertEquals(uiText(R.string.chat_updated_today, "9:05 AM"), shortDate("2026-10-21T15:05:00+00:00", denver, today))
+        assertEquals("Oct 2".asUiText(), shortDate("2026-10-02T15:05:00Z", denver, today))
+        assertEquals("Dec 30, 2025".asUiText(), shortDate("2025-12-30T15:05:00", denver, today))
+        assertEquals("".asUiText(), shortDate("not a date", denver, today))
     }
 }
 

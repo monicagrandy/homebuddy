@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import chat.homebuddy.designsystem.HomeBuddyTheme
+import chat.homebuddy.designsystem.asUiText
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
@@ -40,7 +41,7 @@ class AccountScreenshotTest {
     @Test
     fun deleteFailed() = capture("account_delete_failed") {
         AccountScreen(
-            account.copy(error = "Your Home Buddy data was deleted, but your sign-in account couldn't be closed. Please try again."),
+            account.copy(error = "Your Home Buddy data was deleted, but your sign-in account couldn't be closed. Please try again.".asUiText()),
             AccountActions(),
         )
     }

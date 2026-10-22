@@ -2,10 +2,14 @@ package chat.homebuddy.feature.account
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import chat.homebuddy.app.R
 import chat.homebuddy.core.domain.DeleteAccountResult
 import chat.homebuddy.core.domain.DeleteAccountUseCase
 import chat.homebuddy.core.domain.ObserveSessionUseCase
 import chat.homebuddy.core.domain.SessionState
+import chat.homebuddy.designsystem.UiText
+import chat.homebuddy.designsystem.asUiText
+import chat.homebuddy.designsystem.uiText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +25,7 @@ class AccountViewModel @Inject constructor(
     private val deleteAccount: DeleteAccountUseCase,
 ) : ViewModel() {
     private val deleting = MutableStateFlow(false)
-    private val error = MutableStateFlow<String?>(null)
+    private val error = MutableStateFlow<UiText?>(null)
 
     val state: StateFlow<AccountUiState?> = combine(observeSession(), deleting, error) { current, deleting, error ->
         (current as? SessionState.SignedIn)?.let {
@@ -43,8 +47,8 @@ class AccountViewModel @Inject constructor(
             // On success the session signs out, and the app returns to the sign-in screen with a message.
             when (val result = deleteAccount()) {
                 DeleteAccountResult.Deleted -> Unit
-                DeleteAccountResult.Offline -> error.value = "Couldn't reach Home Buddy. Check your connection and try again."
-                is DeleteAccountResult.Failed -> error.value = result.message
+                DeleteAccountResult.Offline -> error.value = uiText(R.string.error_offline)
+                is DeleteAccountResult.Failed -> error.value = result.message.asUiText()
             }
             deleting.value = false
         }

@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -52,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import chat.homebuddy.app.R
 import chat.homebuddy.core.network.SourceDto
+import chat.homebuddy.designsystem.asString
 
 data class ConversationListActions(
     val onOpen: (ConversationItem) -> Unit = {},
@@ -72,13 +74,13 @@ fun ConversationListScreen(state: ConversationListUiState, actions: Conversation
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    item { Text("Chat", style = MaterialTheme.typography.headlineMedium) }
-                    item { Text(RETENTION_NOTE, style = MaterialTheme.typography.bodySmall) }
-                    state.message?.let { message -> item { Banner(message, actions.onMessageShown) } }
+                    item { Text(stringResource(R.string.tab_chat), style = MaterialTheme.typography.headlineMedium) }
+                    item { Text(stringResource(R.string.retention_note), style = MaterialTheme.typography.bodySmall) }
+                    state.message?.let { message -> item { Banner(message.asString(), actions.onMessageShown) } }
                     if (state.loaded && state.items.isEmpty()) {
                         item {
                             Text(
-                                "Ask about anything in your home's manuals and warranties, like \"Why is my dishwasher not draining?\"",
+                                stringResource(R.string.chat_empty),
                                 style = MaterialTheme.typography.bodyLarge,
                                 modifier = Modifier.padding(vertical = 24.dp),
                             )
@@ -89,10 +91,10 @@ fun ConversationListScreen(state: ConversationListUiState, actions: Conversation
                             Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(item.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Text(item.updatedLabel, style = MaterialTheme.typography.bodySmall)
+                                    Text(item.updatedLabel.asString(), style = MaterialTheme.typography.bodySmall)
                                 }
                                 IconButton(onClick = { actions.onDelete(item) }) {
-                                    Icon(Icons.Filled.Delete, contentDescription = "Delete conversation ${item.title}")
+                                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.chat_delete_conversation_description, item.title))
                                 }
                             }
                         }
@@ -102,7 +104,7 @@ fun ConversationListScreen(state: ConversationListUiState, actions: Conversation
             ExtendedFloatingActionButton(
                 onClick = actions.onNew,
                 icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("New question") },
+                text = { Text(stringResource(R.string.chat_new_question)) },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             )
         }
@@ -130,8 +132,8 @@ fun ConversationScreen(state: ConversationUiState, actions: ConversationActions,
     Surface(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().imePadding()) {
             Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = actions.onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to conversations") }
-                Text(state.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                IconButton(onClick = actions.onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.chat_back)) }
+                Text(state.title ?: stringResource(R.string.chat_new_question), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             HorizontalDivider()
             LazyColumn(
@@ -145,7 +147,7 @@ fun ConversationScreen(state: ConversationUiState, actions: ConversationActions,
                 }
                 items(state.turns) { turn -> Turn(turn, actions) }
             }
-            state.message?.let { Banner(it, actions.onMessageShown, Modifier.padding(horizontal = 16.dp)) }
+            state.message?.let { Banner(it.asString(), actions.onMessageShown, Modifier.padding(horizontal = 16.dp)) }
             Composer(state, actions)
         }
     }
@@ -159,15 +161,15 @@ private fun Turn(turn: ChatTurn, actions: ConversationActions) {
         if (turn.answer.isNotEmpty()) AnswerBlock(turn.answer)
         turn.status?.let { status ->
             Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(status.asString(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LinearProgressIndicator(Modifier.fillMaxWidth(), trackColor = MaterialTheme.colorScheme.surfaceVariant)
             }
         }
         if (turn.sources.isNotEmpty()) Sources(turn.sources, actions.onOpenSource)
         turn.error?.let {
-            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            Text(it.asString(), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         }
-        turn.note?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        turn.note?.let { Text(it.asString(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
@@ -191,27 +193,28 @@ private fun AnswerBlock(markdown: String) {
 
 @Composable
 private fun SafetyCard(alert: SafetyAlert, onCall: () -> Unit) {
+    val callDescription = stringResource(R.string.chat_call_911_description)
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
                 Text(
-                    if (alert.critical) "This could be an emergency" else "This could be dangerous",
+                    stringResource(if (alert.critical) R.string.chat_safety_emergency else R.string.chat_safety_danger),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onErrorContainer,
                 )
             }
             Text(
-                "Get everyone to safety first. Home Buddy can't call anyone for you.",
+                stringResource(R.string.chat_safety_advice),
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             Button(
                 onClick = onCall,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
-                modifier = Modifier.semantics { contentDescription = "Call 911. Opens the phone app; you place the call." },
+                modifier = Modifier.semantics { contentDescription = callDescription },
             ) {
                 Icon(Icons.Filled.Call, contentDescription = null)
-                Text("Call 911", modifier = Modifier.padding(start = 8.dp))
+                Text(stringResource(R.string.chat_call_911), modifier = Modifier.padding(start = 8.dp))
             }
         }
     }
@@ -220,7 +223,7 @@ private fun SafetyCard(alert: SafetyAlert, onCall: () -> Unit) {
 @Composable
 private fun Sources(sources: List<SourceDto>, onOpen: (SourceDto) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("From your documents", style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.chat_sources), style = MaterialTheme.typography.labelMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             sources.take(3).forEach { source ->
                 if (source.url != null) {
@@ -245,7 +248,8 @@ private fun Sources(sources: List<SourceDto>, onOpen: (SourceDto) -> Unit) {
     }
 }
 
-internal fun SourceDto.label(): String = if (page != null) "$displayName · p. $page" else displayName
+@Composable
+private fun SourceDto.label(): String = page?.let { stringResource(R.string.chat_source_page, displayName, it) } ?: displayName
 
 @Composable
 private fun Composer(state: ConversationUiState, actions: ConversationActions) {
@@ -257,7 +261,7 @@ private fun Composer(state: ConversationUiState, actions: ConversationActions) {
         OutlinedTextField(
             value = state.draft,
             onValueChange = actions.onDraftChange,
-            placeholder = { Text(if (state.listening) "Listening…" else "Ask about your home") },
+            placeholder = { Text(stringResource(if (state.listening) R.string.chat_listening else R.string.chat_input_placeholder)) },
             modifier = Modifier.weight(1f),
             maxLines = 5,
         )
@@ -265,16 +269,16 @@ private fun Composer(state: ConversationUiState, actions: ConversationActions) {
             IconButton(onClick = actions.onMic) {
                 Icon(
                     painter = androidx.compose.ui.res.painterResource(if (state.listening) R.drawable.ic_mic_on else R.drawable.ic_mic),
-                    contentDescription = if (state.listening) "Stop dictating" else "Dictate your question",
+                    contentDescription = stringResource(if (state.listening) R.string.chat_stop_dictating else R.string.chat_dictate),
                     tint = if (state.listening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
         if (state.answering) {
-            FilledIconButton(onClick = actions.onStop) { Icon(Icons.Filled.Close, contentDescription = "Stop the answer") }
+            FilledIconButton(onClick = actions.onStop) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.chat_stop_answer)) }
         } else {
             FilledIconButton(onClick = actions.onSend, enabled = state.canSend) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.chat_send))
             }
         }
     }
@@ -289,7 +293,7 @@ private fun Banner(message: String, onClose: () -> Unit, modifier: Modifier = Mo
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
             )
-            TextButton(onClick = onClose) { Text("OK") }
+            TextButton(onClick = onClose) { Text(stringResource(R.string.action_ok)) }
         }
     }
 }

@@ -6,7 +6,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.Density
+import chat.homebuddy.app.R
 import chat.homebuddy.designsystem.HomeBuddyTheme
+import chat.homebuddy.designsystem.asUiText
+import chat.homebuddy.designsystem.uiText
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
@@ -27,9 +30,9 @@ class DocumentsScreenScreenshotTest {
         uploads = listOf(
             UploadItem("1", "GE washer manual", UploadStatus.UPLOADING),
             UploadItem("2", "Nest thermostat", UploadStatus.READING),
-            UploadItem("3", "Kitchen faucet", UploadStatus.FAILED, message = NOT_A_PDF_LINK, openUrl = "https://example.com/support"),
-            UploadItem("4", "Old furnace scan", UploadStatus.FAILED, message = "This PDF has no readable text (it may be a scan)."),
-            UploadItem("5", "Bosch dishwasher (copy)", UploadStatus.DUPLICATE, message = "Already in your documents."),
+            UploadItem("3", "Kitchen faucet", UploadStatus.FAILED, message = uiText(R.string.documents_not_a_pdf_link), openUrl = "https://example.com/support"),
+            UploadItem("4", "Old furnace scan", UploadStatus.FAILED, message = "This PDF has no readable text (it may be a scan).".asUiText()),
+            UploadItem("5", "Bosch dishwasher (copy)", UploadStatus.DUPLICATE, message = uiText(R.string.documents_duplicate)),
         ),
         documents = listOf(
             DocumentItem("bosch", "Bosch dishwasher manual", "manual", indexing = false),
@@ -62,7 +65,7 @@ class DocumentsScreenScreenshotTest {
     @Test
     fun errorBannerLargeFont() = capture("documents_error_font_200", fontScale = 2f) {
         DocumentsScreen(
-            everything.copy(message = "Couldn't reach Home Buddy to delete it. Try again when you're online.", uploads = emptyList()),
+            everything.copy(message = uiText(R.string.documents_delete_offline), uploads = emptyList()),
             DocumentsActions(),
         )
     }

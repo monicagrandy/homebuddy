@@ -2,7 +2,9 @@ package chat.homebuddy.feature.home
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import chat.homebuddy.app.R
 import chat.homebuddy.designsystem.HomeBuddyTheme
+import chat.homebuddy.designsystem.uiText
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
@@ -35,5 +37,5 @@ class HomeSetupScreenshotTest {
     fun saving() = capture("home_setup_saving", HomeSetupUiState(saving = true))
 
     @Test
-    fun serverError() = capture("home_setup_error", HomeSetupUiState(error = "Couldn't reach Home Buddy. Check your connection and try again."))
+    fun serverError() = capture("home_setup_error", HomeSetupUiState(error = uiText(R.string.error_offline)))
 }

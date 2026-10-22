@@ -29,10 +29,13 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import chat.homebuddy.app.R
+import chat.homebuddy.designsystem.asString
 
 data class DocumentsActions(
     val onRefresh: () -> Unit = {},
@@ -55,10 +58,10 @@ fun DocumentsScreen(state: DocumentsUiState, actions: DocumentsActions, modifier
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    item { Text("Documents", style = MaterialTheme.typography.headlineMedium) }
+                    item { Text(stringResource(R.string.tab_documents), style = MaterialTheme.typography.headlineMedium) }
                     state.message?.let { message ->
                         item {
-                            Banner(message, onClose = actions.onMessageShown)
+                            Banner(message.asString(), onClose = actions.onMessageShown)
                         }
                     }
                     if (state.isEmpty) {
@@ -71,7 +74,7 @@ fun DocumentsScreen(state: DocumentsUiState, actions: DocumentsActions, modifier
             ExtendedFloatingActionButton(
                 onClick = actions.onAdd,
                 icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("Add") },
+                text = { Text(stringResource(R.string.documents_add)) },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             )
         }
@@ -81,9 +84,9 @@ fun DocumentsScreen(state: DocumentsUiState, actions: DocumentsActions, modifier
 @Composable
 private fun EmptyState() {
     Column(Modifier.padding(vertical = 32.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("No documents yet", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.documents_empty_title), style = MaterialTheme.typography.titleMedium)
         Text(
-            "Add your appliance manuals and warranties: upload a PDF, scan the QR code on a manual, or share a PDF from another app.",
+            stringResource(R.string.documents_empty_text),
             style = MaterialTheme.typography.bodyMedium,
         )
     }
@@ -98,7 +101,7 @@ private fun Banner(message: String, onClose: () -> Unit) {
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
             )
-            TextButton(onClick = onClose) { Text("OK") }
+            TextButton(onClick = onClose) { Text(stringResource(R.string.action_ok)) }
         }
     }
 }
@@ -111,11 +114,11 @@ private fun DocumentRow(document: DocumentItem, actions: DocumentsActions) {
                 Text(document.name, style = MaterialTheme.typography.titleMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(document.docType.replaceFirstChar(Char::titlecase), style = MaterialTheme.typography.bodySmall)
-                    if (document.indexing) Text("Indexing…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                    if (document.indexing) Text(stringResource(R.string.documents_indexing), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
                 }
             }
             IconButton(onClick = { actions.onDelete(document) }) {
-                Icon(Icons.Filled.Delete, contentDescription = "Delete ${document.name}")
+                Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.documents_delete_description, document.name))
             }
         }
     }
@@ -127,23 +130,23 @@ private fun UploadRow(upload: UploadItem, actions: DocumentsActions) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(upload.name, style = MaterialTheme.typography.titleMedium)
             when (upload.status) {
-                UploadStatus.WAITING -> Status("Waiting to upload…", progress = true)
-                UploadStatus.UPLOADING -> Status("Uploading…", progress = true)
-                UploadStatus.READING -> Status("Reading the document…", progress = true)
+                UploadStatus.WAITING -> Status(stringResource(R.string.documents_waiting), progress = true)
+                UploadStatus.UPLOADING -> Status(stringResource(R.string.documents_uploading), progress = true)
+                UploadStatus.READING -> Status(stringResource(R.string.documents_reading), progress = true)
                 UploadStatus.FAILED, UploadStatus.DUPLICATE -> {
                     upload.message?.let {
                         Text(
-                            it,
+                            it.asString(),
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (upload.status == UploadStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        upload.openUrl?.let { url -> AssistChip(onClick = { actions.onOpenLink(url) }, label = { Text("Open link") }) }
+                        upload.openUrl?.let { url -> AssistChip(onClick = { actions.onOpenLink(url) }, label = { Text(stringResource(R.string.documents_open_link)) }) }
                         if (upload.status == UploadStatus.FAILED && upload.openUrl == null) {
-                            AssistChip(onClick = { actions.onRetry(upload) }, label = { Text("Try again") })
+                            AssistChip(onClick = { actions.onRetry(upload) }, label = { Text(stringResource(R.string.action_try_again)) })
                         }
-                        AssistChip(onClick = { actions.onDismiss(upload) }, label = { Text("Dismiss") })
+                        AssistChip(onClick = { actions.onDismiss(upload) }, label = { Text(stringResource(R.string.documents_dismiss)) })
                     }
                 }
             }

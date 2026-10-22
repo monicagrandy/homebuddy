@@ -2,8 +2,11 @@ package chat.homebuddy.feature.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import chat.homebuddy.app.R
 import chat.homebuddy.core.data.ProfileRepository
 import chat.homebuddy.core.network.toApiError
+import chat.homebuddy.designsystem.asUiText
+import chat.homebuddy.designsystem.uiText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.IOException
 import javax.inject.Inject
@@ -27,9 +30,9 @@ class HomeSetupViewModel @Inject constructor(private val profile: ProfileReposit
                 profile.createHousehold(details.name, details.zipCode, details.homeType)
                 HomeSetupUiState()
             } catch (error: HttpException) {
-                HomeSetupUiState(error = error.toApiError().message)
+                HomeSetupUiState(error = error.toApiError().message.asUiText())
             } catch (_: IOException) {
-                HomeSetupUiState(error = "Couldn't reach Home Buddy. Check your connection and try again.")
+                HomeSetupUiState(error = uiText(R.string.error_offline))
             }
         }
     }

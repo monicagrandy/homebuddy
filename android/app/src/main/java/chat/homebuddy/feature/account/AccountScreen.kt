@@ -25,10 +25,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import chat.homebuddy.app.R
+import chat.homebuddy.designsystem.UiText
+import chat.homebuddy.designsystem.asString
 
 const val PRIVACY_URL = "https://homebuddy.chat/privacy"
 const val TERMS_URL = "https://homebuddy.chat/terms"
@@ -37,9 +41,8 @@ data class AccountUiState(
     val name: String,
     val email: String,
     val householdName: String?,
-    val retentionNote: String = "Chats are kept for 90 days after your last message.",
     val deleting: Boolean = false,
-    val error: String? = null,
+    val error: UiText? = null,
 )
 
 data class AccountActions(
@@ -56,30 +59,30 @@ fun AccountScreen(state: AccountUiState, actions: AccountActions, modifier: Modi
             Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("Account", style = MaterialTheme.typography.headlineMedium)
+            Text(stringResource(R.string.tab_account), style = MaterialTheme.typography.headlineMedium)
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(state.name, style = MaterialTheme.typography.titleMedium)
                     Text(state.email, style = MaterialTheme.typography.bodyMedium)
-                    state.householdName?.let { Text("Home: $it", style = MaterialTheme.typography.bodyMedium) }
+                    state.householdName?.let { Text(stringResource(R.string.account_home, it), style = MaterialTheme.typography.bodyMedium) }
                 }
             }
-            Text(state.retentionNote, style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.retention_note), style = MaterialTheme.typography.bodyMedium)
             Column {
-                TextButton(onClick = { actions.onOpenLink(PRIVACY_URL) }) { Text("Privacy policy") }
-                TextButton(onClick = { actions.onOpenLink(TERMS_URL) }) { Text("Terms of use") }
+                TextButton(onClick = { actions.onOpenLink(PRIVACY_URL) }) { Text(stringResource(R.string.account_privacy)) }
+                TextButton(onClick = { actions.onOpenLink(TERMS_URL) }) { Text(stringResource(R.string.account_terms)) }
             }
             OutlinedButton(onClick = actions.onSignOut, enabled = !state.deleting, modifier = Modifier.fillMaxWidth()) {
-                Text("Sign out of this phone")
+                Text(stringResource(R.string.account_sign_out))
             }
             HorizontalDivider()
-            Text("Delete account", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.account_delete_heading), style = MaterialTheme.typography.titleMedium)
             Text(
-                "Permanently deletes your account, your home's documents and your chats, on every device. This can't be undone.",
+                stringResource(R.string.account_delete_text),
                 style = MaterialTheme.typography.bodyMedium,
             )
             state.error?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                Text(it.asString(), color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             }
             if (state.deleting) {
                 CircularProgressIndicator()
@@ -88,7 +91,7 @@ fun AccountScreen(state: AccountUiState, actions: AccountActions, modifier: Modi
                     onClick = { confirming = true },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (state.error != null) "Try deleting again" else "Delete account…") }
+                ) { Text(stringResource(if (state.error != null) R.string.account_delete_again else R.string.account_delete_action)) }
             }
         }
     }
@@ -112,14 +115,14 @@ fun ConfirmDeleteAccountDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     var typed by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete your account?") },
+        title = { Text(stringResource(R.string.account_delete_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Your account, your home's documents and your chats will be deleted on every device.")
-                OutlinedTextField(value = typed, onValueChange = { typed = it }, singleLine = true, label = { Text("Type DELETE to confirm") })
+                Text(stringResource(R.string.account_delete_confirm_text))
+                OutlinedTextField(value = typed, onValueChange = { typed = it }, singleLine = true, label = { Text(stringResource(R.string.account_delete_confirm_label)) })
             }
         },
-        confirmButton = { TextButton(onClick = onConfirm, enabled = canConfirmDeletion(typed)) { Text("Delete account") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = onConfirm, enabled = canConfirmDeletion(typed)) { Text(stringResource(R.string.account_delete_confirm)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
 }

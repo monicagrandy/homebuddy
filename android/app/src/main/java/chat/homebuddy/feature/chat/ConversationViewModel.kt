@@ -1,13 +1,18 @@
 package chat.homebuddy.feature.chat
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import chat.homebuddy.app.R
 import chat.homebuddy.core.data.ConversationsRepository
 import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
 import chat.homebuddy.core.network.ApiException
 import chat.homebuddy.core.network.toApiError
+import chat.homebuddy.designsystem.UiText
+import chat.homebuddy.designsystem.asUiText
+import chat.homebuddy.designsystem.uiText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.IOException
 import java.util.UUID
@@ -44,7 +49,7 @@ class ConversationViewModel @Inject constructor(
     private val turns = MutableStateFlow<List<ChatTurn>>(emptyList())
     private val draft = MutableStateFlow("")
     private val listening = MutableStateFlow(false)
-    private val message = MutableStateFlow<String?>(null)
+    private val message = MutableStateFlow<UiText?>(null)
     private val _gone = MutableStateFlow(false)
     private var draftBeforeDictation = ""
     private var answer: Job? = null
@@ -61,7 +66,7 @@ class ConversationViewModel @Inject constructor(
     val state: StateFlow<ConversationUiState> =
         combine(repository.conversation(id), repository.messages(id), turns, inputs) { conversation, messages, turns, inputs ->
             ConversationUiState(
-                title = conversation?.title ?: turns.firstOrNull()?.question ?: "New question",
+                title = conversation?.title ?: turns.firstOrNull()?.question,
                 history = messages.map { HistoryMessage(fromUser = it.role == "user", content = it.content) },
                 turns = turns,
                 draft = inputs.draft,
@@ -81,9 +86,9 @@ class ConversationViewModel @Inject constructor(
             try {
                 if (!repository.loadMessages(home.id, id)) _gone.value = true
             } catch (_: IOException) {
-                message.value = "Showing the last saved copy. $OFFLINE"
+                message.value = uiText(R.string.chat_showing_saved_copy)
             } catch (error: HttpException) {
-                message.value = error.toApiError().message
+                message.value = error.toApiError().message.asUiText()
             }
         }
     }
@@ -110,7 +115,7 @@ class ConversationViewModel @Inject constructor(
                 // 409: another device is still being answered in this thread. Keep the question to resend.
                 turns.update { it.dropLast(1) }
                 draft.value = question
-                message.value = error.error.message
+                message.value = error.error.message.asUiText()
             } catch (_: IOException) {
                 updateLast { it.finish() }
             }
@@ -134,9 +139,9 @@ class ConversationViewModel @Inject constructor(
         if (final) listening.value = false
     }
 
-    fun onDictationError(text: String) {
+    fun onDictationError(@StringRes text: Int) {
         listening.value = false
-        message.value = text
+        message.value = uiText(text)
     }
 
     fun onDictationStopped() {
@@ -151,7 +156,7 @@ class ConversationViewModel @Inject constructor(
         turns.update { current -> if (current.isEmpty()) current else current.dropLast(1) + transform(current.last()) }
     }
 
-    private data class Inputs(val draft: String, val listening: Boolean, val voiceAvailable: Boolean, val message: String?)
+    private data class Inputs(val draft: String, val listening: Boolean, val voiceAvailable: Boolean, val message: UiText?)
 
     private companion object {
         const val NEW_ID = "new_conversation_id"

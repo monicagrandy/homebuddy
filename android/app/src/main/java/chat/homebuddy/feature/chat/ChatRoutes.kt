@@ -18,11 +18,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.homebuddy.app.R
 
 @Composable
 fun ConversationListRoute(
@@ -63,10 +65,10 @@ fun ConversationListRoute(
     deleting?.let { item ->
         AlertDialog(
             onDismissRequest = { deleting = null },
-            title = { Text("Delete this conversation?") },
-            text = { Text("It's removed from every device you're signed in on.") },
-            confirmButton = { TextButton(onClick = { deleting = null; viewModel.delete(item) }) { Text("Delete") } },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+            title = { Text(stringResource(R.string.chat_delete_title)) },
+            text = { Text(stringResource(R.string.chat_delete_text)) },
+            confirmButton = { TextButton(onClick = { deleting = null; viewModel.delete(item) }) { Text(stringResource(R.string.action_delete)) } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
 }
@@ -98,14 +100,14 @@ fun ConversationRoute(
             object : SpeechListener {
                 override fun onPartial(text: String) = viewModel.onDictationResult(text, final = false)
                 override fun onFinal(text: String) = viewModel.onDictationResult(text, final = true)
-                override fun onError(message: String) = viewModel.onDictationError(message)
+                override fun onError(message: Int) = viewModel.onDictationError(message)
             },
         )
     }
 
     // Asked the first time the mic is tapped, never before.
     val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startDictation() else viewModel.onDictationError("Allow microphone access to dictate, or type your question.")
+        if (granted) startDictation() else viewModel.onDictationError(R.string.chat_mic_permission_denied)
     }
 
     ConversationScreen(

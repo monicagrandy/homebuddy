@@ -3,6 +3,7 @@ package chat.homebuddy.feature.chat
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import chat.homebuddy.app.R
 import chat.homebuddy.core.data.ConversationsRepository
 import chat.homebuddy.core.data.HomeBuddyDatabase
 import chat.homebuddy.core.data.ProfileRepository
@@ -13,6 +14,8 @@ import chat.homebuddy.core.network.QueryStreamClient
 import chat.homebuddy.core.network.buildApi
 import chat.homebuddy.core.network.buildHttpClient
 import chat.homebuddy.core.testing.ContractFixtures
+import chat.homebuddy.designsystem.asUiText
+import chat.homebuddy.designsystem.uiText
 import java.util.concurrent.CopyOnWriteArrayList
 import javax.inject.Provider
 import kotlinx.coroutines.CoroutineScope
@@ -164,7 +167,7 @@ class ConversationViewModelTest {
         runBlocking { withTimeout(5_000) { gone.gone.first { it } } }
         list.onConversationGone()
 
-        assertEquals("That conversation was deleted, or expired after 90 days without activity.", list.state.value.message)
+        assertEquals(uiText(R.string.chat_conversation_gone), list.state.value.message)
     }
 
     @Test
@@ -189,6 +192,6 @@ class ConversationViewModelTest {
 
         assertTrue(state.turns.isEmpty())
         assertEquals("Are you there?", state.draft)
-        assertEquals("Still answering your last question in this conversation. Try again in a moment.", state.message)
+        assertEquals("Still answering your last question in this conversation. Try again in a moment.".asUiText(), state.message)
     }
 }

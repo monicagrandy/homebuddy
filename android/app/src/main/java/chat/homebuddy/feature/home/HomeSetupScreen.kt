@@ -26,32 +26,36 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.homebuddy.app.R
+import chat.homebuddy.designsystem.UiText
+import chat.homebuddy.designsystem.asString
 
 /** Values the backend's households.home_type expects, with what people see. */
 val HOME_TYPES = listOf(
-    "single_family" to "House",
-    "townhouse" to "Townhouse",
-    "condo" to "Condo",
-    "apartment" to "Apartment",
-    "other" to "Something else",
+    "single_family" to R.string.home_type_single_family,
+    "townhouse" to R.string.home_type_townhouse,
+    "condo" to R.string.home_type_condo,
+    "apartment" to R.string.home_type_apartment,
+    "other" to R.string.home_type_other,
 )
 
-data class HomeSetupUiState(val saving: Boolean = false, val error: String? = null)
+data class HomeSetupUiState(val saving: Boolean = false, val error: UiText? = null)
 
 data class HomeDetails(val name: String, val zipCode: String, val homeType: String)
 
-/** Field problems to show, empty when the details can be sent. */
-fun HomeDetails.problems(): Map<String, String> = buildMap {
-    if (name.isBlank()) put("name", "Give your home a name.")
-    if (name.trim().length > 50) put("name", "Keep the name under 50 characters.")
-    if (!Regex("""\d{5}""").matches(zipCode.trim())) put("zip", "Enter a 5-digit zip code.")
-    if (HOME_TYPES.none { it.first == homeType }) put("type", "Choose a home type.")
+/** Field problems to show (string resources by field), empty when the details can be sent. */
+fun HomeDetails.problems(): Map<String, Int> = buildMap {
+    if (name.isBlank()) put("name", R.string.home_setup_error_name_missing)
+    if (name.trim().length > 50) put("name", R.string.home_setup_error_name_long)
+    if (!Regex("""\d{5}""").matches(zipCode.trim())) put("zip", R.string.home_setup_error_zip)
+    if (HOME_TYPES.none { it.first == homeType }) put("type", R.string.home_setup_error_type)
 }
 
 @Composable
@@ -69,17 +73,17 @@ fun HomeSetupScreen(state: HomeSetupUiState, onSubmit: (HomeDetails) -> Unit, mo
             modifier = Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text("Set up your home", style = MaterialTheme.typography.headlineMedium)
+            Text(stringResource(R.string.home_setup_title), style = MaterialTheme.typography.headlineMedium)
             Text(
-                "Home Buddy keeps your documents and answers for this home. The zip code helps with local advice.",
+                stringResource(R.string.home_setup_intro),
                 style = MaterialTheme.typography.bodyMedium,
             )
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("Name, e.g. Elm Street") },
+                label = { Text(stringResource(R.string.home_setup_name_label)) },
                 isError = "name" in problems,
-                supportingText = problems["name"]?.let { { Text(it) } },
+                supportingText = problems["name"]?.let { { Text(stringResource(it)) } },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 modifier = Modifier.fillMaxWidth(),
@@ -87,14 +91,14 @@ fun HomeSetupScreen(state: HomeSetupUiState, onSubmit: (HomeDetails) -> Unit, mo
             OutlinedTextField(
                 value = zip,
                 onValueChange = { zip = it.filter(Char::isDigit).take(5) },
-                label = { Text("Zip code") },
+                label = { Text(stringResource(R.string.home_setup_zip_label)) },
                 isError = "zip" in problems,
-                supportingText = problems["zip"]?.let { { Text(it) } },
+                supportingText = problems["zip"]?.let { { Text(stringResource(it)) } },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
                 modifier = Modifier.fillMaxWidth(),
             )
-            Text("Type of home", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.home_setup_type_label), style = MaterialTheme.typography.titleSmall)
             Column(Modifier.selectableGroup()) {
                 HOME_TYPES.forEach { (value, label) ->
                     Row(
@@ -105,11 +109,11 @@ fun HomeSetupScreen(state: HomeSetupUiState, onSubmit: (HomeDetails) -> Unit, mo
                             .padding(vertical = 4.dp),
                     ) {
                         RadioButton(selected = type == value, onClick = null)
-                        Text(label, modifier = Modifier.padding(start = 12.dp))
+                        Text(stringResource(label), modifier = Modifier.padding(start = 12.dp))
                     }
                 }
             }
-            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            state.error?.let { Text(it.asString(), color = MaterialTheme.colorScheme.error) }
             if (state.saving) {
                 CircularProgressIndicator()
             } else {
@@ -119,7 +123,7 @@ fun HomeSetupScreen(state: HomeSetupUiState, onSubmit: (HomeDetails) -> Unit, mo
                         if (details.problems().isEmpty()) onSubmit(details.copy(name = name.trim(), zipCode = zip.trim()))
                     },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Continue") }
+                ) { Text(stringResource(R.string.home_setup_continue)) }
             }
         }
     }

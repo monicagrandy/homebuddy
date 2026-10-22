@@ -1,5 +1,6 @@
 package chat.homebuddy.app
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -15,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -31,10 +33,10 @@ import chat.homebuddy.feature.chat.chatDestinations
 import chat.homebuddy.feature.documents.DocumentsDestination
 import chat.homebuddy.feature.documents.documentsDestination
 
-private enum class Tab(val label: String, val icon: ImageVector, val destination: Any) {
-    CHAT("Chat", Icons.Filled.Email, ConversationListDestination),
-    DOCUMENTS("Documents", Icons.AutoMirrored.Filled.List, DocumentsDestination()),
-    ACCOUNT("Account", Icons.Filled.AccountCircle, AccountDestination),
+private enum class Tab(@StringRes val label: Int, val icon: ImageVector, val destination: Any) {
+    CHAT(R.string.tab_chat, Icons.Filled.Email, ConversationListDestination),
+    DOCUMENTS(R.string.tab_documents, Icons.AutoMirrored.Filled.List, DocumentsDestination()),
+    ACCOUNT(R.string.tab_account, Icons.Filled.AccountCircle, AccountDestination),
 }
 
 /**
@@ -57,7 +59,7 @@ fun MainScaffold(share: DocumentsDestination?, onShareOpened: () -> Unit, onSign
                             selected = tab == currentTab,
                             onClick = { navController.navigateToTab(tab.destination, restoreState = true) },
                             icon = { Icon(tab.icon, contentDescription = null) },
-                            label = { Text(tab.label) },
+                            label = { Text(stringResource(tab.label)) },
                         )
                     }
                 }

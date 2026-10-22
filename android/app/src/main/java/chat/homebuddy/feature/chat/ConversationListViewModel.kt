@@ -2,9 +2,13 @@ package chat.homebuddy.feature.chat
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import chat.homebuddy.app.R
 import chat.homebuddy.core.data.ConversationsRepository
 import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
 import chat.homebuddy.core.network.toApiError
+import chat.homebuddy.designsystem.UiText
+import chat.homebuddy.designsystem.asUiText
+import chat.homebuddy.designsystem.uiText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.IOException
 import javax.inject.Inject
@@ -21,8 +25,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
-internal const val OFFLINE = "Couldn't reach Home Buddy. Check your connection and try again."
-
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ConversationListViewModel @Inject constructor(
@@ -31,7 +33,7 @@ class ConversationListViewModel @Inject constructor(
 ) : ViewModel() {
     private val household = observeCurrentHousehold().stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private val refreshing = MutableStateFlow(false)
-    private val message = MutableStateFlow<String?>(null)
+    private val message = MutableStateFlow<UiText?>(null)
 
     val state: StateFlow<ConversationListUiState> = household
         .flatMapLatest { home ->
@@ -59,7 +61,7 @@ class ConversationListViewModel @Inject constructor(
             } catch (_: IOException) {
                 // Offline: keep the cached list.
             } catch (error: HttpException) {
-                message.value = error.toApiError().message
+                message.value = error.toApiError().message.asUiText()
             } finally {
                 refreshing.value = false
             }
@@ -72,16 +74,16 @@ class ConversationListViewModel @Inject constructor(
             try {
                 repository.delete(home.id, item.id)
             } catch (_: IOException) {
-                message.value = OFFLINE
+                message.value = uiText(R.string.error_offline)
             } catch (error: HttpException) {
-                message.value = error.toApiError().message
+                message.value = error.toApiError().message.asUiText()
             }
         }
     }
 
     /** The thread that was opened had been deleted on another device, or expired. */
     fun onConversationGone() {
-        message.value = "That conversation was deleted, or expired after 90 days without activity."
+        message.value = uiText(R.string.chat_conversation_gone)
     }
 
     fun messageShown() {

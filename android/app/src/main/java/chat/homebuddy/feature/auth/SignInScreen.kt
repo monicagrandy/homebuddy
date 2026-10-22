@@ -1,6 +1,5 @@
 package chat.homebuddy.feature.auth
 
-import chat.homebuddy.designsystem.HomeBuddyTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,17 +16,22 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import chat.homebuddy.app.R
+import chat.homebuddy.designsystem.HomeBuddyTheme
+import chat.homebuddy.designsystem.UiText
+import chat.homebuddy.designsystem.asString
 
 sealed interface SignInUiState {
-    data class Idle(val message: String? = null) : SignInUiState
+    data class Idle(val message: UiText? = null) : SignInUiState
     data object InProgress : SignInUiState
-    data class Error(val message: String) : SignInUiState
+    data class Error(val message: UiText) : SignInUiState
 }
 
 @Composable
@@ -41,10 +45,9 @@ fun SignInScreen(state: SignInUiState, onSignIn: () -> Unit, modifier: Modifier 
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // TODO: Use strings.xml instead of hardcoding in the composable
-            Text("Home Buddy", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.primary)
+            Text(stringResource(R.string.app_name), style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.primary)
             Text(
-                "Your home's manuals and warranties, ready to answer questions.",
+                stringResource(R.string.sign_in_tagline),
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
             )
@@ -55,7 +58,7 @@ fun SignInScreen(state: SignInUiState, onSignIn: () -> Unit, modifier: Modifier 
             }
             if (notice != null) {
                 Text(
-                    notice,
+                    notice.asString(),
                     color = if (state is SignInUiState.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
@@ -64,10 +67,10 @@ fun SignInScreen(state: SignInUiState, onSignIn: () -> Unit, modifier: Modifier 
             }
             if (state is SignInUiState.InProgress) {
                 CircularProgressIndicator()
-                Text("Signing you in…", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.sign_in_in_progress), style = MaterialTheme.typography.bodyMedium)
             } else {
                 Button(onClick = onSignIn, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (state is SignInUiState.Error) "Try again" else "Sign in")
+                    Text(stringResource(if (state is SignInUiState.Error) R.string.action_try_again else R.string.sign_in_action))
                 }
             }
         }

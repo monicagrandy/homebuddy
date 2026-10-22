@@ -1,3 +1,126 @@
 <resources>
     <string name="app_name">Home Buddy</string>
+
+    <!-- Shared -->
+    <string name="action_cancel">Cancel</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_try_again">Try again</string>
+    <string name="action_ok">OK</string>
+    <string name="error_offline">Couldn\'t reach Home Buddy. Check your connection and try again.</string>
+    <string name="retention_note">Chats are kept for 90 days after your last message.</string>
+
+    <!-- Tabs -->
+    <string name="tab_chat">Chat</string>
+    <string name="tab_documents">Documents</string>
+    <string name="tab_account">Account</string>
+
+    <!-- Sign-in -->
+    <string name="sign_in_tagline">Your home\'s manuals and warranties, ready to answer questions.</string>
+    <string name="sign_in_in_progress">Signing you in…</string>
+    <string name="sign_in_action">Sign in</string>
+    <string name="sign_in_session_ended">You\'ve been signed out. Please sign in again.</string>
+    <string name="sign_in_account_deleted">Your account and its data have been deleted.</string>
+    <string name="sign_in_failed">Couldn\'t sign in. Please try again.</string>
+    <string name="sign_in_not_in_beta">This account isn\'t part of the Home Buddy beta yet.</string>
+
+    <!-- Home setup -->
+    <string name="home_setup_title">Set up your home</string>
+    <string name="home_setup_intro">Home Buddy keeps your documents and answers for this home. The zip code helps with local advice.</string>
+    <string name="home_setup_name_label">Name, e.g. Elm Street</string>
+    <string name="home_setup_zip_label">Zip code</string>
+    <string name="home_setup_type_label">Type of home</string>
+    <string name="home_setup_continue">Continue</string>
+    <string name="home_type_single_family">House</string>
+    <string name="home_type_townhouse">Townhouse</string>
+    <string name="home_type_condo">Condo</string>
+    <string name="home_type_apartment">Apartment</string>
+    <string name="home_type_other">Something else</string>
+    <string name="home_setup_error_name_missing">Give your home a name.</string>
+    <string name="home_setup_error_name_long">Keep the name under 50 characters.</string>
+    <string name="home_setup_error_zip">Enter a 5-digit zip code.</string>
+    <string name="home_setup_error_type">Choose a home type.</string>
+
+    <!-- Chat -->
+    <string name="chat_empty">Ask about anything in your home\'s manuals and warranties, like \"Why is my dishwasher not draining?\"</string>
+    <string name="chat_delete_conversation_description">Delete conversation %1$s</string>
+    <string name="chat_new_question">New question</string>
+    <string name="chat_updated_today">Today, %1$s</string>
+    <string name="chat_back">Back to conversations</string>
+    <string name="chat_thinking">Thinking…</string>
+    <string name="chat_connection_dropped">The connection dropped. Home Buddy still finishes the answer: reopen this conversation in a moment to see it.</string>
+    <string name="chat_stopped">Stopped. Home Buddy still finishes this answer and saves it in this conversation.</string>
+    <string name="chat_safety_emergency">This could be an emergency</string>
+    <string name="chat_safety_danger">This could be dangerous</string>
+    <string name="chat_safety_advice">Get everyone to safety first. Home Buddy can\'t call anyone for you.</string>
+    <string name="chat_call_911">Call 911</string>
+    <string name="chat_call_911_description">Call 911. Opens the phone app; you place the call.</string>
+    <string name="chat_sources">From your documents</string>
+    <string name="chat_source_page">%1$s · p. %2$d</string>
+    <string name="chat_listening">Listening…</string>
+    <string name="chat_input_placeholder">Ask about your home</string>
+    <string name="chat_stop_dictating">Stop dictating</string>
+    <string name="chat_dictate">Dictate your question</string>
+    <string name="chat_stop_answer">Stop the answer</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_delete_title">Delete this conversation?</string>
+    <string name="chat_delete_text">It\'s removed from every device you\'re signed in on.</string>
+    <string name="chat_conversation_gone">That conversation was deleted, or expired after 90 days without activity.</string>
+    <string name="chat_showing_saved_copy">Showing the last saved copy. Couldn\'t reach Home Buddy. Check your connection and try again.</string>
+    <string name="chat_mic_permission_denied">Allow microphone access to dictate, or type your question.</string>
+    <string name="voice_unavailable">Voice input isn\'t available on this phone.</string>
+    <string name="voice_no_match">Didn\'t catch that. Tap the mic and try again.</string>
+    <string name="voice_needs_permission">Home Buddy needs microphone access for voice input.</string>
+    <string name="voice_needs_network">Voice input needs a connection on this phone.</string>
+    <string name="voice_stopped">Voice input stopped. You can type your question instead.</string>
+
+    <!-- Documents -->
+    <string name="documents_add">Add</string>
+    <string name="documents_empty_title">No documents yet</string>
+    <string name="documents_empty_text">Add your appliance manuals and warranties: upload a PDF, scan the QR code on a manual, or share a PDF from another app.</string>
+    <string name="documents_indexing">Indexing…</string>
+    <string name="documents_delete_description">Delete %1$s</string>
+    <string name="documents_waiting">Waiting to upload…</string>
+    <string name="documents_uploading">Uploading…</string>
+    <string name="documents_reading">Reading the document…</string>
+    <string name="documents_open_link">Open link</string>
+    <string name="documents_dismiss">Dismiss</string>
+    <string name="documents_duplicate">Already in your documents.</string>
+    <string name="documents_not_a_pdf_link">This link opens a web page, not a PDF. Open it, find the manual, and share the PDF to Home Buddy.</string>
+    <string name="documents_add_failed">The document couldn\'t be added.</string>
+    <string name="documents_too_large">That PDF is larger than 50 MB.</string>
+    <string name="documents_unreadable">Couldn\'t read that file.</string>
+    <string name="documents_delete_offline">Couldn\'t reach Home Buddy to delete it. Try again when you\'re online.</string>
+    <string name="documents_default_name">Manual</string>
+    <string name="documents_add_title">Add a document</string>
+    <string name="documents_add_upload">Upload a PDF</string>
+    <string name="documents_add_scan">Scan a manual\'s QR code</string>
+    <string name="documents_add_link">Paste a link</string>
+    <string name="documents_name_title">Name this document</string>
+    <string name="documents_name_source">From %1$s</string>
+    <string name="documents_name_label">Name</string>
+    <string name="documents_link_title">Add from a link</string>
+    <string name="documents_link_placeholder">https://…</string>
+    <string name="documents_link_hint">A link to the PDF works best.</string>
+    <string name="documents_link_not_secure">Use an https:// link.</string>
+    <string name="documents_link_not_a_link">That isn\'t a web link.</string>
+    <string name="documents_link_next">Next</string>
+    <string name="documents_delete_title">Delete %1$s?</string>
+    <string name="documents_delete_text">Home Buddy will stop using it in answers, on every device. This can\'t be undone.</string>
+    <string name="documents_qr_insecure">That QR code uses an insecure link, so it wasn\'t added.</string>
+    <string name="documents_qr_not_a_link">That QR code doesn\'t contain a web link.</string>
+    <string name="documents_qr_unavailable">The QR scanner isn\'t available on this phone right now.</string>
+
+    <!-- Account -->
+    <string name="account_home">Home: %1$s</string>
+    <string name="account_privacy">Privacy policy</string>
+    <string name="account_terms">Terms of use</string>
+    <string name="account_sign_out">Sign out of this phone</string>
+    <string name="account_delete_heading">Delete account</string>
+    <string name="account_delete_text">Permanently deletes your account, your home\'s documents and your chats, on every device. This can\'t be undone.</string>
+    <string name="account_delete_again">Try deleting again</string>
+    <string name="account_delete_action">Delete account…</string>
+    <string name="account_delete_title">Delete your account?</string>
+    <string name="account_delete_confirm_text">Your account, your home\'s documents and your chats will be deleted on every device.</string>
+    <string name="account_delete_confirm_label">Type DELETE to confirm</string>
+    <string name="account_delete_confirm">Delete account</string>
 </resources>
