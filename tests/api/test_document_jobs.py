@@ -208,3 +208,21 @@ def test_jobs_are_private_to_the_household(client, household_id):
 
 def test_unknown_jobs_are_not_found(client, household_id):
     assert client.get("/documents/jobs/does-not-exist").status_code == 404
+
+
+def test_uploads_still_index_and_deduplicate_with_encryption_on(client, household_id, run_jobs, monkeypatch):
+    from backend.encryption import MARKER, generate_key
+    from backend.models import Document
+
+    monkeypatch.setenv("DOCUMENT_ENCRYPTION_KEY", generate_key())
+    _upload(client, household_id, key="enc-1")
+    duplicate = _upload(client, household_id, key="enc-2")
+
+    ingestion = run_jobs()
+
+    assert duplicate.json()["status"] == "duplicate"
+    assert ingestion.calls[0]["file_bytes"] == PDF
+    with client.testing_session_local() as session:
+        raw = session.execute(api.text("SELECT file_bytes FROM documents")).scalar_one()
+        assert bytes(raw).startswith(MARKER)
+        assert session.query(Document).one().file_bytes == PDF

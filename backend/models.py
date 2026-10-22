@@ -1,11 +1,12 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.config import settings
 from backend.db import Base
+from backend.encryption import EncryptedBytes
 
 try:
     from pgvector.sqlalchemy import Vector
@@ -104,7 +105,8 @@ class Document(Base):
     doc_type: Mapped[str] = mapped_column(String)
     source_name: Mapped[str] = mapped_column(String)
     source_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    file_bytes: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    # Encrypted at rest when DOCUMENT_ENCRYPTION_KEY is set (backend/encryption.py).
+    file_bytes: Mapped[Optional[bytes]] = mapped_column(EncryptedBytes, nullable=True)
     uploaded_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

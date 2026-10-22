@@ -10,7 +10,22 @@
 
 homebuddy.chat {
     encode gzip zstd
-    reverse_proxy frontend:8501
+
+    # Static policy pages (deploy/site), linked from the app stores and the apps.
+    handle /privacy {
+        root * /srv/site
+        rewrite * /privacy.html
+        file_server
+    }
+    handle /terms {
+        root * /srv/site
+        rewrite * /terms.html
+        file_server
+    }
+
+    handle {
+        reverse_proxy frontend:8501
+    }
 }
 
 # Public API for the native apps. This is the only site that reaches the backend.

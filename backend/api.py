@@ -40,6 +40,7 @@ from backend.guardrails.guardrails import SafetyBlockError
 from backend.ingestion.loader import DocumentLoadError
 from backend.ingestion.pipeline import IngestionCancelled
 from backend.middleware import TrustedHostGuard
+from backend.encryption import _load_key as load_document_key
 from backend.migrations import upgrade_database
 from backend.rate_limit import rate_limited
 from backend.models import (
@@ -210,6 +211,9 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(
             f"Cognito configuration is incomplete. Missing: {', '.join(missing)}"
         )
+    # Fail fast on a malformed key rather than on the first upload.
+    if load_document_key() is None and settings.is_production:
+        logger.warning("DOCUMENT_ENCRYPTION_KEY isn't set; uploaded documents are stored unencrypted.")
     if settings.database_url.startswith("postgresql"):
         # Postgres schema is owned by Alembic (alembic/versions).
         upgrade_database(engine)

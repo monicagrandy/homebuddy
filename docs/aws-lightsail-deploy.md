@@ -260,6 +260,22 @@ Google Play requires apps to let people delete their account both in the app and
 
 Without the key, the data is still deleted but the Cognito sign-in remains, and the backend logs a warning.
 
+### Privacy before going public
+
+Do these before publishing the apps:
+
+1. **Encrypt stored documents.** Generate a key and add it to `.env` as `DOCUMENT_ENCRYPTION_KEY`, then encrypt files saved earlier:
+
+   ```bash
+   docker compose -f docker-compose.aws.yml exec backend python -c "from backend.encryption import generate_key; print(generate_key())"
+   docker compose -f docker-compose.aws.yml up -d backend
+   docker compose -f docker-compose.aws.yml exec backend python scripts/encrypt_documents.py --apply
+   ```
+
+   Back the key up with your other secrets. Without it, stored files can't be read back; search keeps working because it uses the extracted text.
+2. **Decide what LangSmith sees.** It records full questions and answers by default. To keep monitoring without storing content, add `LANGSMITH_HIDE_INPUTS=true` and `LANGSMITH_HIDE_OUTPUTS=true` to `.env`, or turn tracing off with `LANGCHAIN_TRACING_V2=false`. Update the Privacy Policy to match.
+3. **Review the policy pages.** `deploy/site/privacy.html` and `deploy/site/terms.html` are served at `/privacy` and `/terms`. Fill in the contact address and check they still describe what Home Buddy does.
+
 ## Step 6: Start HomeBuddy
 
 From the repo root on the server:
