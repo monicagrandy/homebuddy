@@ -1,0 +1,9 @@
+# Copy to local.properties (not committed) and fill in.
+sdk.dir=/Users/you/Library/Android/sdk
+
+# Cognito hosted UI for the Android app client (see docs/aws-lightsail-deploy.md, "Android app client").
+homebuddy.cognitoDomain=https://your-domain.auth.us-east-2.amazoncognito.com
+homebuddy.cognitoClientId=your-android-app-client-id
+
+# Optional: override the dev API (default http://10.0.2.2:8000, the host machine from the emulator).
+# homebuddy.devApiBaseUrl=http://10.0.2.2:8000
