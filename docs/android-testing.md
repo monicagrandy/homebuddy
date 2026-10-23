@@ -41,6 +41,8 @@ Mark each with the build, the device and the date.
 - [ ] Sign in with the hosted UI in a Custom Tab. Password managers fill it, MFA works, and you come back to the app.
 - [ ] A brand-new account goes to "Set up your home". An account with a home goes straight in.
 - [ ] Cancel sign-in with Back: you're returned to "Sign in", with no error.
+- [ ] Back after signing in, including with predictive back: Documents and Account go to Chat, and Chat closes the app. It never shows "Sign in" or "Set up your home".
+- [ ] Back on "Sign in" after signing out closes the app; it never reopens the signed-in screens.
 - [ ] An account outside the beta group sees "This account isn't part of the Home Buddy beta yet."
 - [ ] Sign out, then sign in again as a **different** account: the hosted UI asks again rather than reusing the first.
 - [ ] Leave the app for more than an hour (access tokens last an hour), then use it: still signed in, with no error.

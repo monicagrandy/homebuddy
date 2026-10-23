@@ -25,12 +25,25 @@ import kotlinx.coroutines.launch
 
 /** Which part of the app to show. */
 sealed interface AppUiState {
-    /** Signed out, signing in, or loading the profile. */
-    data class SignIn(val screen: SignInUiState) : AppUiState
+    /**
+     * Reading the stored session, or (signed in) fetching the profile for the first time on this
+     * phone. [error] when that fetch failed.
+     */
+    data class Loading(val error: UiText? = null) : AppUiState
+
+    data class SignedOut(val signIn: SignInUiState) : AppUiState
 
     data object HomeSetup : AppUiState
 
     data object Main : AppUiState
+}
+
+/** What the sign-in screen shows. It's also the screen at launch, while the session loads. */
+fun AppUiState.signInScreen(): SignInUiState = when (this) {
+    is AppUiState.Loading -> error?.let(SignInUiState::Error) ?: SignInUiState.InProgress
+    is AppUiState.SignedOut -> signIn
+    // For the moment the sign-in screen is being replaced.
+    AppUiState.HomeSetup, AppUiState.Main -> SignInUiState.InProgress
 }
 
 @HiltViewModel
@@ -48,8 +61,8 @@ class SessionViewModel @Inject constructor(
     val state: StateFlow<AppUiState> = combine(session, signingIn, signInError, profileError) { session, signingIn, signInError, profileError ->
         when (session) {
             is SessionState.SignedIn -> if (session.needsHome) AppUiState.HomeSetup else AppUiState.Main
-            SessionState.Loading -> AppUiState.SignIn(profileError?.let(SignInUiState::Error) ?: SignInUiState.InProgress)
-            is SessionState.SignedOut -> AppUiState.SignIn(
+            SessionState.Loading -> AppUiState.Loading(profileError)
+            is SessionState.SignedOut -> AppUiState.SignedOut(
                 when {
                     signingIn -> SignInUiState.InProgress
                     signInError != null -> SignInUiState.Error(signInError)
@@ -57,7 +70,7 @@ class SessionViewModel @Inject constructor(
                 },
             )
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, AppUiState.SignIn(SignInUiState.InProgress))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, AppUiState.Loading())
 
     private val _pendingLogoutUrl = MutableStateFlow<String?>(null)
 

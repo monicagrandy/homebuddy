@@ -8,6 +8,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -18,14 +20,15 @@ import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.rememberNavController
 import chat.homebuddy.designsystem.HomeBuddyTheme
-import chat.homebuddy.feature.auth.AppUiState
 import chat.homebuddy.feature.auth.SessionViewModel
-import chat.homebuddy.feature.auth.SignInScreen
+import chat.homebuddy.feature.auth.SignInDestination
+import chat.homebuddy.feature.auth.signInScreen
 import chat.homebuddy.feature.documents.DocumentsDestination
 import chat.homebuddy.feature.documents.ManualLink
 import chat.homebuddy.feature.documents.parseManualLink
-import chat.homebuddy.feature.home.HomeSetupRoute
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.serialization.json.Json
 
@@ -43,7 +46,7 @@ class MainActivity : ComponentActivity() {
             savedInstanceState.getString(PENDING_SHARE)?.let { Json.decodeFromString<DocumentsDestination>(it) }
         }
         setContent {
-            HomeBuddyTheme { HomeBuddyRoot(pendingShare, onShareOpened = { pendingShare = null }) }
+            HomeBuddyTheme { HomeBuddyRoot(pendingShare = { pendingShare }, onShareOpened = { pendingShare = null }) }
         }
     }
 
@@ -80,12 +83,12 @@ private fun Intent.toShare(): DocumentsDestination? {
 }
 
 /**
- * Which part of the app shows follows the session, not navigation: you can't go "back" to
- * signing in, and the stored session decides it again on every launch.
+ * The root NavHost: sign-in, home setup and the signed-in app. The session decides which one you're
+ * on, and every change navigates there (see [navigateForSession]).
  */
 @Composable
 private fun HomeBuddyRoot(
-    pendingShare: DocumentsDestination?,
+    pendingShare: () -> DocumentsDestination?,
     onShareOpened: () -> Unit,
     viewModel: SessionViewModel = hiltViewModel(),
 ) {
@@ -102,9 +105,25 @@ private fun HomeBuddyRoot(
         }
     }
 
-    when (val current = state) {
-        AppUiState.Main -> MainScaffold(share = pendingShare, onShareOpened = onShareOpened, onSignOut = viewModel::onSignOutClick)
-        AppUiState.HomeSetup -> HomeSetupRoute()
-        is AppUiState.SignIn -> SignInScreen(current.screen, onSignIn = { viewModel.onSignInClick()?.let(signIn::launch) })
+    val navController = rememberNavController()
+    NavHost(
+        navController,
+        startDestination = SignInDestination,
+        // Signing in or out replaces the whole screen, so there's no animation.
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+    ) {
+        appDestinations(
+            signInState = { state.signInScreen() },
+            onSignIn = { viewModel.onSignInClick()?.let(signIn::launch) },
+            pendingShare = pendingShare,
+            onShareOpened = onShareOpened,
+            onSignOut = viewModel::onSignOutClick,
+        )
+    }
+    // After NavHost, so its graph is set by the time this runs.
+    val destination = state.destination()
+    LaunchedEffect(destination) {
+        destination?.let(navController::navigateForSession)
     }
 }

@@ -3,10 +3,10 @@ package chat.homebuddy.feature.account
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.homebuddy.app.R
+import chat.homebuddy.core.data.ProfileRepository
 import chat.homebuddy.core.domain.DeleteAccountResult
 import chat.homebuddy.core.domain.DeleteAccountUseCase
-import chat.homebuddy.core.domain.ObserveSessionUseCase
-import chat.homebuddy.core.domain.SessionState
+import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
 import chat.homebuddy.designsystem.UiText
 import chat.homebuddy.designsystem.asUiText
 import chat.homebuddy.designsystem.uiText
@@ -21,18 +21,20 @@ import kotlinx.coroutines.launch
 
 @HiltViewModel
 class AccountViewModel @Inject constructor(
-    observeSession: ObserveSessionUseCase,
+    profile: ProfileRepository,
+    observeCurrentHousehold: ObserveCurrentHouseholdUseCase,
     private val deleteAccount: DeleteAccountUseCase,
 ) : ViewModel() {
     private val deleting = MutableStateFlow(false)
     private val error = MutableStateFlow<UiText?>(null)
 
-    val state: StateFlow<AccountUiState?> = combine(observeSession(), deleting, error) { current, deleting, error ->
-        (current as? SessionState.SignedIn)?.let {
+    /** From the cached profile; this screen doesn't need the session itself, only who's signed in. */
+    val state: StateFlow<AccountUiState?> = combine(profile.profile, observeCurrentHousehold(), deleting, error) { profile, home, deleting, error ->
+        profile?.let {
             AccountUiState(
                 name = it.user.displayName ?: it.user.email,
                 email = it.user.email,
-                householdName = it.households.firstOrNull()?.name,
+                householdName = home?.name,
                 deleting = deleting,
                 error = error,
             )

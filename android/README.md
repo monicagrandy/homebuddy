@@ -34,7 +34,12 @@ Two modules, so the one boundary that matters is enforced: screens can't reach D
 | `:core` | `core.network`, `core.auth`, `core.data`, `core.domain` (+ `core.testing` test fixtures) | Retrofit API and models mirroring `backend/schemas.py`, the SSE stream client, sign-in and token storage, the Room cache, the upload worker, stateless repositories, and the use cases that combine them (sign in, sign out, delete account, observe the session) |
 | `:app` | `app`, `designsystem`, `feature.auth`, `feature.home`, `feature.documents`, `feature.chat`, `feature.account` | Screens, ViewModels, the theme, the activity, Hilt setup, flavors and the manifest |
 
-Each feature declares its typed Navigation Compose destinations next to its screens (`ChatNavigation.kt`, `DocumentsNavigation.kt`, `AccountNavigation.kt`), and `MainScaffold` puts them in one `NavHost` with a bottom bar. Signing in and setting up a home aren't destinations: which of those shows follows the stored session.
+Each feature declares its typed Navigation Compose destinations next to its screens (`SignInNavigation.kt`, `ChatNavigation.kt`, `DocumentsNavigation.kt` and so on). There are two `NavHost`s:
+
+- The root one, in `MainActivity`, holds sign-in, home setup and the signed-in app. The session decides which one you're on. Each change navigates there and clears the back stack (`navigateForSession` in `AppNavigation.kt`), so back from the app never returns to sign-in, and back from sign-in never goes into the app.
+- `MainScaffold`, the signed-in app, has its own `NavHost` for the tabs and the conversation screen, with a bottom bar.
+
+ViewModels belong to the destination they're created on. Signing out removes the signed-in destination, which clears every ViewModel created in the app, the tabs' included.
 
 UI text lives in `app/src/main/res/values/strings.xml`. ViewModels hand screens a `UiText` (a string resource, or a server message shown as is) and never read resources themselves.
 
