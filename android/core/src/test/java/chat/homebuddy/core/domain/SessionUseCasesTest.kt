@@ -109,12 +109,13 @@ class SessionUseCasesTest {
         profile = ProfileRepository(api, database.profile())
         val documents = DocumentsRepository(api, database.documents(), database.uploads(), UploadFiles(folder.newFolder("uploads")), FakeScheduler())
         val conversations = ConversationsRepository(api, QueryStreamClient(http, config), database.conversations())
-        signOut = SignOutUseCase(auth, profile, documents, conversations)
-        session = NetworkSession(auth, signOut)
+        val endSession = EndSessionUseCase(auth, profile, documents, conversations)
+        signOut = SignOutUseCase(endSession, auth)
+        session = NetworkSession(auth, endSession)
         observeSession = ObserveSessionUseCase(auth, profile)
         signIn = SignInUseCase(auth, profile)
-        refreshProfile = RefreshProfileUseCase(auth, profile, signOut)
-        deleteAccount = DeleteAccountUseCase(profile, signOut)
+        refreshProfile = RefreshProfileUseCase(auth, profile, endSession)
+        deleteAccount = DeleteAccountUseCase(profile, endSession)
     }
 
     @After

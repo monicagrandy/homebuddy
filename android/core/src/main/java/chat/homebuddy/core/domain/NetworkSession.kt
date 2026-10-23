@@ -12,14 +12,14 @@ import javax.inject.Inject
 /** Gives the HTTP client this phone's tokens, and ends the session when the server rejects it. */
 class NetworkSession @Inject constructor(
     private val auth: AuthRepository,
-    private val signOut: SignOutUseCase,
+    private val endSession: EndSessionUseCase,
 ) : AccessTokenProvider {
     override suspend fun accessToken(forceRefresh: Boolean): String? = auth.accessToken(forceRefresh)
 
     override suspend fun onSessionRejected() {
         if (auth.isSignedIn()) {
             // For example the account was deleted on another device, or the refresh token expired.
-            signOut(SignOutReason.SESSION_ENDED)
+            endSession(SignOutReason.SESSION_ENDED)
         } else {
             // A sign-in still being set up: SignInUseCase reports the failure.
             auth.forgetUnsavedSignIn()

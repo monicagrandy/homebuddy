@@ -88,26 +88,45 @@ class SignInUseCase @Inject constructor(
     }
 }
 
-class SignOutUseCase @Inject constructor(
+/**
+ * Ends this phone's session (other devices stay signed in) and wipes what was cached for the
+ * account. Every way a session ends comes through here: signing out, deleting the account, the
+ * server rejecting the session, and leaving the beta.
+ */
+class EndSessionUseCase @Inject constructor(
     private val auth: AuthRepository,
     private val profile: ProfileRepository,
     private val documents: DocumentsRepository,
     private val conversations: ConversationsRepository,
 ) {
     /**
-     * Ends this phone's session (other devices stay signed in) and wipes what was cached for the
-     * account. It runs to the end even if the caller goes away, which it will: the screens that
-     * call it leave as soon as the session ends. [reason] is shown on the sign-in screen until
-     * the next sign-in attempt.
-     *
-     * Returns the hosted UI's logout page, for the caller to open when the user chose to sign out.
+     * Runs to the end even if the caller goes away, which it will: the signed-in screens, and
+     * their ViewModels, are cleared as soon as the session ends. [reason] is shown on the sign-in
+     * screen until the next sign-in attempt.
      */
-    suspend operator fun invoke(reason: SignOutReason? = null): String = withContext(NonCancellable) {
-        auth.clear(reason)
-        documents.wipe()
-        conversations.wipe()
-        profile.clear()
-        auth.signOutUrl()
+    suspend operator fun invoke(reason: SignOutReason? = null) {
+        withContext(NonCancellable) {
+            auth.clear(reason)
+            documents.wipe()
+            conversations.wipe()
+            profile.clear()
+        }
+    }
+}
+
+/** Signing out because the user asked to. */
+class SignOutUseCase @Inject constructor(
+    private val endSession: EndSessionUseCase,
+    private val auth: AuthRepository,
+) {
+    /**
+     * Ends the session, then returns the hosted UI's logout page for the caller to open. That
+     * ends the browser's sign-in too, so the next sign-in can pick another account. Sessions that
+     * end without the user asking skip it, so a browser never opens unprompted.
+     */
+    suspend operator fun invoke(): String {
+        endSession()
+        return auth.signOutUrl()
     }
 }
 
@@ -115,7 +134,7 @@ class SignOutUseCase @Inject constructor(
 class RefreshProfileUseCase @Inject constructor(
     private val auth: AuthRepository,
     private val profile: ProfileRepository,
-    private val signOut: SignOutUseCase,
+    private val endSession: EndSessionUseCase,
 ) {
     /** False when Home Buddy couldn't be reached or failed; the cached profile is kept. */
     suspend operator fun invoke(): Boolean {
@@ -128,7 +147,7 @@ class RefreshProfileUseCase @Inject constructor(
                 // The HTTP client has already ended the session (see NetworkSession).
                 401 -> true
                 403 -> {
-                    signOut(SignOutReason.NOT_IN_BETA)
+                    endSession(SignOutReason.NOT_IN_BETA)
                     true
                 }
                 else -> false
@@ -151,7 +170,7 @@ sealed interface DeleteAccountResult {
  */
 class DeleteAccountUseCase @Inject constructor(
     private val profile: ProfileRepository,
-    private val signOut: SignOutUseCase,
+    private val endSession: EndSessionUseCase,
 ) {
     suspend operator fun invoke(): DeleteAccountResult {
         val response = try {
@@ -162,7 +181,8 @@ class DeleteAccountUseCase @Inject constructor(
         if (!response.isSuccessful) {
             return DeleteAccountResult.Failed(parseApiError(response.code(), response.errorBody()?.string()).message)
         }
-        signOut(SignOutReason.ACCOUNT_DELETED)
+        // The account is gone on the server; this phone still has to end its session like any other.
+        endSession(SignOutReason.ACCOUNT_DELETED)
         return DeleteAccountResult.Deleted
     }
 }
