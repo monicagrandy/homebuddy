@@ -6,7 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import chat.homebuddy.app.R
-import chat.homebuddy.core.data.ConversationsRepository
+import chat.homebuddy.core.data.conversations.ConversationsRepository
 import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
 import chat.homebuddy.core.network.ApiException
 import chat.homebuddy.core.network.toApiError

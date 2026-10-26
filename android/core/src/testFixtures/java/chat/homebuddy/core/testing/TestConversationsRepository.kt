@@ -1,8 +1,8 @@
 package chat.homebuddy.core.testing
 
 import chat.homebuddy.core.data.ConversationEntity
-import chat.homebuddy.core.data.ConversationsRepository
 import chat.homebuddy.core.data.MessageEntity
+import chat.homebuddy.core.data.conversations.ConversationsRepository
 import chat.homebuddy.core.network.StreamEvent
 import kotlinx.coroutines.flow.Flow
 

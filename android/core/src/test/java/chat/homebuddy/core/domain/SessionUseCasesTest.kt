@@ -7,10 +7,12 @@ import chat.homebuddy.core.auth.AuthStore
 import chat.homebuddy.core.auth.SignInPageResult
 import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.auth.TokenSet
-import chat.homebuddy.core.data.CachedConversationsRepository
 import chat.homebuddy.core.data.DocumentEntity
 import chat.homebuddy.core.data.FakeScheduler
 import chat.homebuddy.core.data.HomeBuddyDatabase
+import chat.homebuddy.core.data.conversations.CachedConversationsRepository
+import chat.homebuddy.core.data.conversations.RetrofitConversationsRemoteDataSource
+import chat.homebuddy.core.data.conversations.RoomConversationsLocalDataSource
 import chat.homebuddy.core.data.documents.CachedDocumentsRepository
 import chat.homebuddy.core.data.documents.RetrofitDocumentsRemoteDataSource
 import chat.homebuddy.core.data.documents.RoomDocumentsLocalDataSource
@@ -108,7 +110,10 @@ class SessionUseCasesTest {
             UploadFiles(folder.newFolder("uploads")),
             FakeScheduler(),
         )
-        val conversations = CachedConversationsRepository(api, QueryStreamClient(http, config), database.conversations())
+        val conversations = CachedConversationsRepository(
+            RetrofitConversationsRemoteDataSource(api, QueryStreamClient(http, config)),
+            RoomConversationsLocalDataSource(database.conversations()),
+        )
         val endSession = EndSessionUseCase(auth, profile, documents, conversations)
         signOut = SignOutUseCase(endSession, auth)
         session = NetworkSession(auth, endSession)

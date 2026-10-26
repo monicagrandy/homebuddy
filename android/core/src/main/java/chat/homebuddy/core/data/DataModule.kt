@@ -2,6 +2,12 @@ package chat.homebuddy.core.data
 
 import android.content.Context
 import androidx.room.Room
+import chat.homebuddy.core.data.conversations.CachedConversationsRepository
+import chat.homebuddy.core.data.conversations.ConversationsLocalDataSource
+import chat.homebuddy.core.data.conversations.ConversationsRemoteDataSource
+import chat.homebuddy.core.data.conversations.ConversationsRepository
+import chat.homebuddy.core.data.conversations.RetrofitConversationsRemoteDataSource
+import chat.homebuddy.core.data.conversations.RoomConversationsLocalDataSource
 import chat.homebuddy.core.data.documents.CachedDocumentsRepository
 import chat.homebuddy.core.data.documents.DocumentsLocalDataSource
 import chat.homebuddy.core.data.documents.DocumentsRemoteDataSource
@@ -84,6 +90,16 @@ object DataModule {
 
     @Provides
     @Singleton
-    fun conversationsRepository(api: HomeBuddyApi, streams: QueryStreamClient, database: HomeBuddyDatabase): ConversationsRepository =
-        CachedConversationsRepository(api, streams, database.conversations())
+    fun conversationsLocalDataSource(database: HomeBuddyDatabase): ConversationsLocalDataSource =
+        RoomConversationsLocalDataSource(database.conversations())
+
+    @Provides
+    @Singleton
+    fun conversationsRemoteDataSource(api: HomeBuddyApi, streams: QueryStreamClient): ConversationsRemoteDataSource =
+        RetrofitConversationsRemoteDataSource(api, streams)
+
+    @Provides
+    @Singleton
+    fun conversationsRepository(remote: ConversationsRemoteDataSource, local: ConversationsLocalDataSource): ConversationsRepository =
+        CachedConversationsRepository(remote, local)
 }

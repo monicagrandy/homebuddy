@@ -1,5 +1,7 @@
-package chat.homebuddy.core.data
+package chat.homebuddy.core.data.conversations
 
+import chat.homebuddy.core.data.ConversationEntity
+import chat.homebuddy.core.data.MessageEntity
 import chat.homebuddy.core.network.StreamEvent
 import kotlinx.coroutines.flow.Flow
 

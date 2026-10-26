@@ -4,9 +4,11 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import chat.homebuddy.app.R
-import chat.homebuddy.core.data.CachedConversationsRepository
-import chat.homebuddy.core.data.ConversationsRepository
 import chat.homebuddy.core.data.HomeBuddyDatabase
+import chat.homebuddy.core.data.conversations.CachedConversationsRepository
+import chat.homebuddy.core.data.conversations.ConversationsRepository
+import chat.homebuddy.core.data.conversations.RetrofitConversationsRemoteDataSource
+import chat.homebuddy.core.data.conversations.RoomConversationsLocalDataSource
 import chat.homebuddy.core.data.profile.CachedProfileRepository
 import chat.homebuddy.core.data.profile.ProfileRepository
 import chat.homebuddy.core.data.profile.RetrofitProfileRemoteDataSource
@@ -90,7 +92,10 @@ class ConversationViewModelTest {
         database = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HomeBuddyDatabase::class.java).build()
         profile = CachedProfileRepository(RetrofitProfileRemoteDataSource(api), RoomProfileLocalDataSource(database.profile()))
         profile.refresh()
-        conversations = CachedConversationsRepository(api, QueryStreamClient(client, config), database.conversations())
+        conversations = CachedConversationsRepository(
+            RetrofitConversationsRemoteDataSource(api, QueryStreamClient(client, config)),
+            RoomConversationsLocalDataSource(database.conversations()),
+        )
         viewModel = conversation()
         Unit
     }

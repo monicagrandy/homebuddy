@@ -1,39 +1,38 @@
-package chat.homebuddy.core.data
+package chat.homebuddy.core.data.conversations
 
+import chat.homebuddy.core.data.ConversationEntity
+import chat.homebuddy.core.data.ConversationSyncEntity
+import chat.homebuddy.core.data.MessageEntity
 import chat.homebuddy.core.network.ConversationDto
-import chat.homebuddy.core.network.HomeBuddyApi
 import chat.homebuddy.core.network.MessageDto
-import chat.homebuddy.core.network.QueryRequestDto
-import chat.homebuddy.core.network.QueryStreamClient
 import chat.homebuddy.core.network.StreamEvent
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import retrofit2.HttpException
 
 /**
- * [ConversationsRepository] as a Room cache. The list syncs incrementally (updated_since) and in
- * full at most once a day, which is also how threads deleted on another device disappear here.
+ * [ConversationsRepository] as a cache. The list syncs incrementally (updated_since) and in full at
+ * most once a day, which is also how threads deleted on another device disappear here.
  */
 class CachedConversationsRepository(
-    private val api: HomeBuddyApi,
-    private val streams: QueryStreamClient,
-    private val dao: ConversationDao,
+    private val remote: ConversationsRemoteDataSource,
+    private val local: ConversationsLocalDataSource,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : ConversationsRepository {
-    override fun conversations(householdId: Int): Flow<List<ConversationEntity>> = dao.observe(householdId)
+    override fun conversations(householdId: Int): Flow<List<ConversationEntity>> = local.conversations(householdId)
 
-    override fun conversation(id: String): Flow<ConversationEntity?> = dao.observeOne(id)
+    override fun conversation(id: String): Flow<ConversationEntity?> = local.conversation(id)
 
-    override fun messages(conversationId: String): Flow<List<MessageEntity>> = dao.observeMessages(conversationId)
+    override fun messages(conversationId: String): Flow<List<MessageEntity>> = local.messages(conversationId)
 
     override suspend fun sync(householdId: Int, forceFull: Boolean) {
-        val state = dao.syncState(householdId)
+        val state = local.syncState(householdId)
         val full = forceFull || state == null || clock() - state.lastFullSyncAt >= FULL_SYNC_EVERY_MILLIS
-        val fetched = api.conversations(householdId, updatedSince = if (full) null else state?.newestUpdatedAt)
+        val fetched = remote.conversations(householdId, updatedSince = if (full) null else state?.newestUpdatedAt)
         val entities = fetched.map { it.toEntity() }
-        if (full) dao.replaceAll(householdId, entities) else dao.upsert(entities)
+        if (full) local.replaceAll(householdId, entities) else local.upsert(entities)
         val newest = (entities.map { it.updatedAt } + listOfNotNull(state?.newestUpdatedAt.takeUnless { full })).maxOrNull()
-        dao.saveSyncState(
+        local.saveSyncState(
             ConversationSyncEntity(
                 householdId = householdId,
                 lastFullSyncAt = if (full) clock() else state!!.lastFullSyncAt,
@@ -43,29 +42,22 @@ class CachedConversationsRepository(
     }
 
     override suspend fun loadMessages(householdId: Int, conversationId: String): Boolean {
-        val messages = try {
-            api.conversationMessages(conversationId, householdId)
-        } catch (error: HttpException) {
-            if (error.code() == 404) {
-                dao.delete(conversationId)
-                return false
-            }
-            throw error
+        val messages = remote.messages(householdId, conversationId)
+        if (messages == null) {
+            local.delete(conversationId)
+            return false
         }
-        dao.replaceMessages(conversationId, messages.mapIndexed { index, message -> message.toEntity(conversationId, index) })
+        local.replaceMessages(conversationId, messages.mapIndexed { index, message -> message.toEntity(conversationId, index) })
         return true
     }
 
     override suspend fun delete(householdId: Int, conversationId: String) {
-        val response = api.deleteConversation(conversationId, householdId)
-        if (!response.isSuccessful && response.code() != 404) throw HttpException(response)
-        dao.delete(conversationId)
+        remote.delete(householdId, conversationId)
+        local.delete(conversationId)
     }
 
-    // The request starts when the caller collects the flow and runs on OkHttp's threads, so
-    // collecting on the main thread never blocks it.
     override fun ask(householdId: Int, conversationId: String, question: String, zipCode: String?): Flow<StreamEvent> =
-        streams.stream(QueryRequestDto(question = question, sessionId = conversationId, householdId = householdId, householdZipCode = zipCode))
+        remote.ask(householdId, conversationId, question, zipCode)
 
     override suspend fun afterAnswer(householdId: Int, conversationId: String) {
         // The server has saved the answer, so a refresh that fails here is caught up by the next sync.
@@ -78,7 +70,7 @@ class CachedConversationsRepository(
     }
 
     override suspend fun wipe() {
-        dao.clear()
+        local.clear()
     }
 
     companion object {
