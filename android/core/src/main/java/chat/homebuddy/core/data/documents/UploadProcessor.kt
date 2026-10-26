@@ -1,15 +1,10 @@
-package chat.homebuddy.core.data
+package chat.homebuddy.core.data.documents
 
-import chat.homebuddy.core.network.DocumentJobDto
-import chat.homebuddy.core.network.HomeBuddyApi
-import chat.homebuddy.core.network.toApiError
+import chat.homebuddy.core.data.UploadEntity
+import chat.homebuddy.core.data.UploadState
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.delay
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
 
 enum class UploadOutcome {
@@ -26,89 +21,81 @@ enum class UploadOutcome {
  * uploads table, so a run that's interrupted picks up where it stopped.
  */
 class UploadProcessor(
-    private val api: HomeBuddyApi,
-    private val uploads: UploadDao,
-    private val documents: DocumentDao,
+    private val remote: DocumentsRemoteDataSource,
+    private val local: DocumentsLocalDataSource,
     private val files: UploadFiles,
     private val pollIntervalMillis: Long = 3_000,
     private val maxPolls: Int = 100,
     private val wait: suspend (Long) -> Unit = { delay(it) },
 ) {
     suspend fun process(uploadId: String): UploadOutcome {
-        var upload = uploads.get(uploadId) ?: return UploadOutcome.FINISHED
+        var upload = local.upload(uploadId) ?: return UploadOutcome.FINISHED
         if (upload.jobId == null) {
-            upload = submit(upload) ?: return if (uploads.get(uploadId)?.state == UploadState.QUEUED) UploadOutcome.RETRY else UploadOutcome.FINISHED
+            upload = submit(upload) ?: return if (local.upload(uploadId)?.state == UploadState.QUEUED) UploadOutcome.RETRY else UploadOutcome.FINISHED
         }
         return poll(upload)
     }
 
     /** After the last attempt WorkManager allows, show the upload as failed so the user can retry it. */
     suspend fun giveUp(uploadId: String) {
-        val upload = uploads.get(uploadId) ?: return
+        val upload = local.upload(uploadId) ?: return
         if (upload.state == UploadState.FAILED || upload.state == UploadState.DUPLICATE) return
-        uploads.upsert(
+        local.saveUpload(
             upload.copy(state = UploadState.FAILED, errorCode = "network", errorMessage = "Couldn't upload. Check your connection and try again."),
         )
     }
 
     /** Returns the upload with its job, or null when it ended (duplicate, rejected) or must wait. */
     private suspend fun submit(upload: UploadEntity): UploadEntity? {
-        uploads.upsert(upload.copy(state = UploadState.UPLOADING))
-        val job = try {
-            api.createDocumentJob(
-                idempotencyKey = upload.id,
-                householdId = upload.householdId.toString().toPlain(),
-                displayName = upload.displayName.toPlain(),
-                docType = upload.docType.toPlain(),
-                file = upload.filePath?.let { path ->
-                    MultipartBody.Part.createFormData("file", "${upload.id}.pdf", File(path).asRequestBody(PDF))
-                },
-                url = upload.url?.toPlain(),
-            )
-        } catch (error: HttpException) {
-            if (error.code() >= 500 || error.code() == 429) {
-                uploads.upsert(upload.copy(state = UploadState.QUEUED))
+        local.saveUpload(upload.copy(state = UploadState.UPLOADING))
+        val submission = try {
+            remote.submit(upload.id, upload.householdId, upload.displayName, upload.docType, upload.filePath?.let(::File), upload.url)
+        } catch (_: IOException) {
+            JobSubmission.TryLater
+        }
+        val job = when (submission) {
+            is JobSubmission.Accepted -> submission.job
+            JobSubmission.TryLater -> {
+                local.saveUpload(upload.copy(state = UploadState.QUEUED))
                 return null
             }
-            val apiError = error.toApiError()
-            fail(upload, apiError.code ?: "rejected", apiError.message)
-            return null
-        } catch (_: IOException) {
-            uploads.upsert(upload.copy(state = UploadState.QUEUED))
-            return null
+            is JobSubmission.Rejected -> {
+                fail(upload, submission.code ?: "rejected", submission.message)
+                return null
+            }
         }
 
         // The server has the file now; the local copy isn't needed any more.
         files.delete(upload.filePath)
         if (job.status == "duplicate") {
-            uploads.upsert(
+            local.saveUpload(
                 upload.copy(state = UploadState.DUPLICATE, filePath = null, entryId = job.duplicateOf ?: job.entryId),
             )
             return null
         }
         val indexing = upload.copy(state = UploadState.INDEXING, filePath = null, jobId = job.jobId, entryId = job.entryId)
-        uploads.upsert(indexing)
+        local.saveUpload(indexing)
         return indexing
     }
 
     private suspend fun poll(upload: UploadEntity): UploadOutcome {
         val jobId = checkNotNull(upload.jobId)
         repeat(maxPolls) {
-            if (uploads.get(upload.id) == null) return UploadOutcome.FINISHED // dismissed meanwhile
-            val job: DocumentJobDto = try {
-                api.documentJob(jobId)
+            if (local.upload(upload.id) == null) return UploadOutcome.FINISHED // dismissed meanwhile
+            val job = try {
+                remote.job(jobId)
             } catch (_: IOException) {
                 return UploadOutcome.RETRY
-            } catch (error: HttpException) {
-                if (error.code() == 404) {
-                    fail(upload, "deleted", "This document was removed before it finished.")
-                    return UploadOutcome.FINISHED
-                }
+            } catch (_: HttpException) {
                 return UploadOutcome.RETRY
+            }
+            if (job == null) {
+                fail(upload, "deleted", "This document was removed before it finished.")
+                return UploadOutcome.FINISHED
             }
             when (job.status) {
                 "succeeded" -> {
-                    uploads.delete(upload.id)
+                    local.deleteUpload(upload.id)
                     refreshDocuments(upload.householdId)
                     return UploadOutcome.FINISHED
                 }
@@ -124,22 +111,15 @@ class UploadProcessor(
 
     private suspend fun fail(upload: UploadEntity, code: String, message: String) {
         files.delete(upload.filePath)
-        uploads.upsert(upload.copy(state = UploadState.FAILED, filePath = null, errorCode = code, errorMessage = message))
+        local.saveUpload(upload.copy(state = UploadState.FAILED, filePath = null, errorCode = code, errorMessage = message))
     }
 
     private suspend fun refreshDocuments(householdId: Int) {
         // The upload is done either way; the documents list refreshes again when it's next opened.
         try {
-            documents.replaceAll(householdId, api.documents(householdId).map { it.toEntity(householdId) })
+            local.replaceDocuments(householdId, remote.documents(householdId).map { it.toEntity(householdId) })
         } catch (_: IOException) {
         } catch (_: HttpException) {
         }
-    }
-
-    private companion object {
-        val PDF = "application/pdf".toMediaType()
-        val TEXT = "text/plain".toMediaType()
-
-        fun String.toPlain() = toRequestBody(TEXT)
     }
 }

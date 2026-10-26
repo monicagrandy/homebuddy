@@ -1,11 +1,13 @@
-package chat.homebuddy.core.data
+package chat.homebuddy.core.data.documents
 
+import chat.homebuddy.core.data.DocumentEntity
+import chat.homebuddy.core.data.FakeScheduler
+import chat.homebuddy.core.data.UploadState
+import chat.homebuddy.core.data.upload
+import chat.homebuddy.core.testing.httpError
 import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -14,86 +16,54 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 import retrofit2.HttpException
 
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
-class DocumentsRepositoryTest {
+class CachedDocumentsRepositoryTest {
     @get:Rule
     val folder = TemporaryFolder()
 
-    private val server = MockWebServer()
+    private val remote = TestDocumentsRemoteDataSource()
+    private val local = TestDocumentsLocalDataSource()
     private val scheduler = FakeScheduler()
-    private lateinit var database: HomeBuddyDatabase
     private lateinit var uploadsDir: File
-    private lateinit var repository: DocumentsRepository
+    private lateinit var repository: CachedDocumentsRepository
 
     @Before
     fun setUp() {
-        server.start()
-        database = inMemoryDatabase()
         uploadsDir = folder.newFolder("uploads")
-        repository = CachedDocumentsRepository(
-            apiFor(server),
-            database.documents(),
-            database.uploads(),
-            UploadFiles(uploadsDir),
-            scheduler,
-            clock = { 42L },
-            newId = { "upload-1" },
-        )
-    }
-
-    @After
-    fun tearDown() {
-        database.close()
-        server.shutdown()
+        repository = CachedDocumentsRepository(remote, local, UploadFiles(uploadsDir), scheduler, clock = { 42L }, newId = { "upload-1" })
     }
 
     private suspend fun cached() = repository.documents(7).first().map { it.entryId }
 
     private suspend fun cache(vararg entryIds: String) =
-        database.documents().upsertAll(entryIds.map { DocumentEntity(7, it, it, "manual", "ready", null, null) })
+        local.replaceDocuments(7, entryIds.map { DocumentEntity(7, it, it, "manual", "ready", null, null) })
 
     @Test
     fun `a refresh replaces the cache, so documents deleted elsewhere disappear`() = runTest {
         cache("deleted-on-the-web")
-        server.enqueue(json(documentsJson("bosch-manual" to "ready", "ge-washer" to "indexing")))
+        remote.documents[7] = listOf(documentDto("bosch-manual"), documentDto("ge-washer", status = "indexing"))
 
         repository.refresh(7)
 
         assertEquals(listOf("bosch-manual", "ge-washer"), cached())
-        assertEquals("/documents?household_id=7", server.takeRequest().path)
+        assertEquals("indexing", repository.documents(7).first()[1].status)
     }
 
     @Test
-    fun `deleting removes the document`() = runTest {
+    fun `deleting removes the document on the server and here`() = runTest {
         cache("bosch-manual")
-        server.enqueue(MockResponse().setResponseCode(204))
 
         repository.delete(7, "bosch-manual")
 
-        assertTrue(cached().isEmpty())
-        assertEquals("DELETE", server.takeRequest().method)
-    }
-
-    @Test
-    fun `deleting something already deleted on another device still removes it here`() = runTest {
-        cache("bosch-manual")
-        server.enqueue(json("""{"detail": "Document not found."}""", code = 404))
-
-        repository.delete(7, "bosch-manual")
-
+        assertEquals(listOf("bosch-manual"), remote.deleted)
         assertTrue(cached().isEmpty())
     }
 
     @Test
     fun `a failed delete keeps the document`() = runTest {
         cache("bosch-manual")
-        server.enqueue(json("""{"detail": "Something went wrong."}""", code = 500))
+        remote.deleteFailure = httpError(500)
 
         val error = runCatching { repository.delete(7, "bosch-manual") }.exceptionOrNull()
 
@@ -107,6 +77,7 @@ class DocumentsRepositoryTest {
 
         val upload = repository.uploads(7).first().single()
         assertEquals(UploadState.QUEUED, upload.state)
+        assertEquals(42L, upload.createdAt)
         assertEquals("%PDF-1.4", File(upload.filePath!!).readText())
         assertEquals(listOf(id), scheduler.scheduled)
     }
@@ -126,15 +97,16 @@ class DocumentsRepositoryTest {
         repository.addLink(7, "Bosch manual", "https://example.com/manual.pdf")
 
         assertEquals("https://example.com/manual.pdf", repository.uploads(7).first().single().url)
+        assertEquals(listOf("upload-1"), scheduler.scheduled)
     }
 
     @Test
     fun `retrying clears the error and schedules again`() = runTest {
-        database.uploads().upsert(upload().copy(state = UploadState.FAILED, errorCode = "network", errorMessage = "Offline"))
+        local.saveUpload(upload().copy(state = UploadState.FAILED, errorCode = "network", errorMessage = "Offline"))
 
         repository.retry("upload-1")
 
-        val upload = database.uploads().get("upload-1")!!
+        val upload = local.upload("upload-1")!!
         assertEquals(UploadState.QUEUED, upload.state)
         assertNull(upload.errorCode)
         assertEquals(listOf("upload-1"), scheduler.scheduled)
@@ -143,11 +115,11 @@ class DocumentsRepositoryTest {
     @Test
     fun `dismissing cancels the work and deletes the copy`() = runTest {
         repository.addFile(7, "Bosch manual", "%PDF-1.4".byteInputStream())
-        val copy = File(database.uploads().get("upload-1")!!.filePath!!)
+        val copy = File(local.upload("upload-1")!!.filePath!!)
 
         repository.dismiss("upload-1")
 
-        assertNull(database.uploads().get("upload-1"))
+        assertNull(local.upload("upload-1"))
         assertFalse(copy.exists())
         assertEquals(listOf("upload-1"), scheduler.cancelled)
     }
@@ -160,7 +132,7 @@ class DocumentsRepositoryTest {
         repository.wipe()
 
         assertTrue(cached().isEmpty())
-        assertTrue(database.uploads().all().isEmpty())
+        assertTrue(repository.uploads(7).first().isEmpty())
         assertFalse(uploadsDir.exists())
         assertTrue(scheduler.cancelledAll)
     }

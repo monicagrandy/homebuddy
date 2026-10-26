@@ -10,6 +10,9 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import chat.homebuddy.core.data.documents.UploadOutcome
+import chat.homebuddy.core.data.documents.UploadProcessor
+import chat.homebuddy.core.data.documents.UploadScheduler
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors

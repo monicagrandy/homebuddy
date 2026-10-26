@@ -1,4 +1,4 @@
-package chat.homebuddy.core.data
+package chat.homebuddy.core.data.documents
 
 import java.io.File
 import java.io.InputStream

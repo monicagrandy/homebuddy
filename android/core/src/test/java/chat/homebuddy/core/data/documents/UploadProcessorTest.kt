@@ -1,9 +1,11 @@
-package chat.homebuddy.core.data
+package chat.homebuddy.core.data.documents
 
+import chat.homebuddy.core.data.UploadState
+import chat.homebuddy.core.data.upload
+import chat.homebuddy.core.testing.httpError
+import java.io.IOException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
-import okhttp3.mockwebserver.MockWebServer
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -12,67 +14,51 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
 class UploadProcessorTest {
     @get:Rule
     val folder = TemporaryFolder()
 
-    private val server = MockWebServer()
-    private lateinit var database: HomeBuddyDatabase
+    private val remote = TestDocumentsRemoteDataSource()
+    private val local = TestDocumentsLocalDataSource()
     private lateinit var files: UploadFiles
     private lateinit var processor: UploadProcessor
 
     @Before
     fun setUp() {
-        server.start()
-        database = inMemoryDatabase()
         files = UploadFiles(folder.newFolder("uploads"))
-        processor = UploadProcessor(apiFor(server), database.uploads(), database.documents(), files, pollIntervalMillis = 0, maxPolls = 3, wait = {})
-    }
-
-    @After
-    fun tearDown() {
-        database.close()
-        server.shutdown()
+        processor = UploadProcessor(remote, local, files, pollIntervalMillis = 0, maxPolls = 3, wait = {})
     }
 
     private suspend fun queuedFile(id: String = "upload-1") =
-        files.save(id, "%PDF-1.4 manual".byteInputStream()).also { database.uploads().upsert(upload(id, file = it)) }
+        files.save(id, "%PDF-1.4 manual".byteInputStream()).also { local.saveUpload(upload(id, file = it)) }
 
-    private suspend fun stored(id: String = "upload-1") = database.uploads().get(id)
+    private suspend fun indexing() = local.saveUpload(upload(state = UploadState.INDEXING, jobId = "job-1"))
+
+    private suspend fun stored(id: String = "upload-1") = local.upload(id)
 
     @Test
     fun `an upload is sent once, polled until indexed, then becomes a document`() = runTest {
         val copy = queuedFile()
-        server.enqueue(json(job("queued"), code = 202))
-        server.enqueue(json(job("running")))
-        server.enqueue(json(job("succeeded")))
-        server.enqueue(json(documentsJson("bosch-manual" to "ready")))
+        remote.jobs += listOf(jobDto("running"), jobDto("succeeded"))
+        remote.documents[7] = listOf(documentDto("bosch-manual"))
 
         val outcome = processor.process("upload-1")
 
         assertEquals(UploadOutcome.FINISHED, outcome)
-        val post = server.takeRequest()
-        assertEquals("POST", post.method)
-        assertEquals("/documents/jobs", post.path)
-        assertEquals("upload-1", post.getHeader("Idempotency-Key"))
-        val body = post.body.readUtf8()
-        assertTrue(body.contains("name=\"household_id\"") && body.contains("Bosch manual") && body.contains("%PDF-1.4 manual"))
-        assertEquals("/documents/jobs/job-1", server.takeRequest().path)
+        assertEquals(
+            listOf(TestDocumentsRemoteDataSource.Submitted("upload-1", 7, "Bosch manual", "%PDF-1.4 manual", url = null)),
+            remote.submitted,
+        )
         assertNull(stored())
         assertFalse("the local copy is deleted once the server has it", copy.exists())
-        assertEquals(listOf("bosch-manual"), database.documents().observe(7).first().map { it.entryId })
+        assertEquals(listOf("bosch-manual"), local.documents(7).first().map { it.entryId })
     }
 
     @Test
     fun `the same file from another device is reported as a duplicate`() = runTest {
         val copy = queuedFile()
-        server.enqueue(json(job("duplicate", jobId = null, duplicateOf = "web-manual")))
+        remote.submission = JobSubmission.Accepted(jobDto("duplicate", jobId = null, duplicateOf = "web-manual"))
 
         assertEquals(UploadOutcome.FINISHED, processor.process("upload-1"))
 
@@ -84,7 +70,7 @@ class UploadProcessorTest {
     @Test
     fun `a file the server rejects fails without retrying`() = runTest {
         queuedFile()
-        server.enqueue(json("""{"detail": {"code": "not_pdf", "message": "The uploaded file is not a PDF."}}""", code = 422))
+        remote.submission = JobSubmission.Rejected("not_pdf", "The uploaded file is not a PDF.")
 
         assertEquals(UploadOutcome.FINISHED, processor.process("upload-1"))
 
@@ -96,7 +82,7 @@ class UploadProcessorTest {
     @Test
     fun `a busy server means try again later, keeping the file`() = runTest {
         val copy = queuedFile()
-        server.enqueue(json("""{"detail": "Too many requests."}""", code = 429))
+        remote.submission = JobSubmission.TryLater
 
         assertEquals(UploadOutcome.RETRY, processor.process("upload-1"))
 
@@ -107,7 +93,7 @@ class UploadProcessorTest {
     @Test
     fun `being offline means try again later`() = runTest {
         queuedFile()
-        server.shutdown()
+        remote.offline = true
 
         assertEquals(UploadOutcome.RETRY, processor.process("upload-1"))
         assertEquals(UploadState.QUEUED, stored()?.state)
@@ -115,33 +101,44 @@ class UploadProcessorTest {
 
     @Test
     fun `an interrupted upload resumes by polling its job, without sending again`() = runTest {
-        database.uploads().upsert(upload(state = UploadState.INDEXING, jobId = "job-1"))
-        server.enqueue(json(job("succeeded")))
-        server.enqueue(json(documentsJson("bosch-manual" to "ready")))
+        indexing()
+        remote.jobs += jobDto("succeeded")
 
         assertEquals(UploadOutcome.FINISHED, processor.process("upload-1"))
 
-        assertEquals("GET", server.takeRequest().method)
+        assertTrue(remote.submitted.isEmpty())
         assertNull(stored())
     }
 
     @Test
+    fun `a finished upload stays finished when the documents list can't be refreshed`() = runTest {
+        listOf(IOException("No connection"), httpError(503)).forEach { failure ->
+            indexing()
+            remote.jobs += jobDto("succeeded")
+            remote.listFailure = failure
+
+            assertEquals(UploadOutcome.FINISHED, processor.process("upload-1"))
+
+            assertNull(stored())
+        }
+    }
+
+    @Test
     fun `a link that turns out to be a web page fails with not_pdf`() = runTest {
-        database.uploads().upsert(upload(url = "https://example.com/support"))
-        server.enqueue(json(job("queued"), code = 202))
-        server.enqueue(json(job("failed", errorCode = "not_pdf", error = "The URL did not return a PDF.")))
+        local.saveUpload(upload(url = "https://example.com/support"))
+        remote.jobs += jobDto("failed", errorCode = "not_pdf", error = "The URL did not return a PDF.")
 
         assertEquals(UploadOutcome.FINISHED, processor.process("upload-1"))
 
-        assertTrue(server.takeRequest().body.readUtf8().contains("https://example.com/support"))
+        assertEquals("https://example.com/support", remote.submitted.single().url)
         assertEquals(UploadState.FAILED, stored()?.state)
         assertEquals("not_pdf", stored()?.errorCode)
     }
 
     @Test
     fun `a job that disappeared means the document was deleted elsewhere`() = runTest {
-        database.uploads().upsert(upload(state = UploadState.INDEXING, jobId = "job-1"))
-        server.enqueue(json("""{"detail": "Job not found."}""", code = 404))
+        indexing()
+        remote.jobs += null
 
         assertEquals(UploadOutcome.FINISHED, processor.process("upload-1"))
 
@@ -150,19 +147,21 @@ class UploadProcessorTest {
 
     @Test
     fun `a long index keeps the upload and checks again later`() = runTest {
-        database.uploads().upsert(upload(state = UploadState.INDEXING, jobId = "job-1"))
-        repeat(3) { server.enqueue(json(job("running"))) }
+        indexing()
+        repeat(3) { remote.jobs += jobDto("running") }
 
         assertEquals(UploadOutcome.RETRY, processor.process("upload-1"))
 
         assertEquals(UploadState.INDEXING, stored()?.state)
-        assertEquals(3, server.requestCount)
+        assertEquals(3, remote.polls)
     }
 
     @Test
     fun `a dismissed upload does nothing`() = runTest {
         assertEquals(UploadOutcome.FINISHED, processor.process("never-queued"))
-        assertEquals(0, server.requestCount)
+
+        assertTrue(remote.submitted.isEmpty())
+        assertEquals(0, remote.polls)
     }
 
     @Test

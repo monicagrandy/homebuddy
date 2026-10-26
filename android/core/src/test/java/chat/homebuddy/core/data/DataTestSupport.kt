@@ -2,6 +2,7 @@ package chat.homebuddy.core.data
 
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import chat.homebuddy.core.data.documents.UploadScheduler
 import chat.homebuddy.core.network.AccessTokenProvider
 import chat.homebuddy.core.network.ApiConfig
 import chat.homebuddy.core.network.HomeBuddyApi

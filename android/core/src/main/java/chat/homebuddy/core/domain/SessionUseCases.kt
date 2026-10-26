@@ -6,7 +6,7 @@ import chat.homebuddy.core.auth.SignInFailed
 import chat.homebuddy.core.auth.SignInPageResult
 import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.data.ConversationsRepository
-import chat.homebuddy.core.data.DocumentsRepository
+import chat.homebuddy.core.data.documents.DocumentsRepository
 import chat.homebuddy.core.data.profile.Household
 import chat.homebuddy.core.data.profile.ProfileRepository
 import chat.homebuddy.core.network.toApiError

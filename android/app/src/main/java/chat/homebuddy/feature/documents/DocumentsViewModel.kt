@@ -5,8 +5,8 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.homebuddy.app.R
-import chat.homebuddy.core.data.DocumentsRepository
-import chat.homebuddy.core.data.UploadFiles
+import chat.homebuddy.core.data.documents.DocumentsRepository
+import chat.homebuddy.core.data.documents.UploadFiles
 import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
 import chat.homebuddy.core.network.toApiError
 import chat.homebuddy.designsystem.UiText

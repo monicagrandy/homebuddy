@@ -1,8 +1,8 @@
 package chat.homebuddy.core.testing
 
 import chat.homebuddy.core.data.DocumentEntity
-import chat.homebuddy.core.data.DocumentsRepository
 import chat.homebuddy.core.data.UploadEntity
+import chat.homebuddy.core.data.documents.DocumentsRepository
 import java.io.InputStream
 import kotlinx.coroutines.flow.Flow
 

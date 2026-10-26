@@ -1,5 +1,7 @@
-package chat.homebuddy.core.data
+package chat.homebuddy.core.data.documents
 
+import chat.homebuddy.core.data.DocumentEntity
+import chat.homebuddy.core.data.UploadEntity
 import java.io.InputStream
 import kotlinx.coroutines.flow.Flow
 
@@ -12,6 +14,7 @@ interface UploadScheduler {
 
 /** A home's documents, and the uploads still on their way to the server. */
 interface DocumentsRepository {
+    /** By name. */
     fun documents(householdId: Int): Flow<List<DocumentEntity>>
 
     fun uploads(householdId: Int): Flow<List<UploadEntity>>
