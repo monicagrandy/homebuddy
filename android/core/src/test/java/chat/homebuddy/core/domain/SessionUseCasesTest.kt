@@ -1,12 +1,11 @@
 package chat.homebuddy.core.domain
 
-import android.content.Intent
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import chat.homebuddy.core.auth.AccessTokenCache
 import chat.homebuddy.core.auth.AuthClient
 import chat.homebuddy.core.auth.AuthRepository
 import chat.homebuddy.core.auth.AuthStore
-import chat.homebuddy.core.auth.SignInCancelled
+import chat.homebuddy.core.auth.SignInPageResult
 import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.auth.TokenSet
 import chat.homebuddy.core.auth.XorCipher
@@ -53,8 +52,7 @@ private class FakeAuthClient : AuthClient {
     var exchange: () -> TokenSet = { TokenSet("access-1", "id-1", "refresh-1", expiresAtMillis = null) }
     var refresh: (String) -> TokenSet? = { TokenSet("access-2", "id-2", refreshToken = null, expiresAtMillis = null) }
 
-    override fun signInIntent() = Intent("sign-in")
-    override suspend fun exchange(result: Intent?) = exchange()
+    override suspend fun exchange(code: SignInPageResult.Code) = exchange()
     override suspend fun refresh(refreshToken: String) = refresh.invoke(refreshToken)
     override fun signOutUrl() = "https://auth.example.com/logout"
 }
@@ -81,6 +79,7 @@ class SessionUseCasesTest {
     private lateinit var refreshProfile: RefreshProfileUseCase
     private lateinit var deleteAccount: DeleteAccountUseCase
 
+    private val code = SignInPageResult.Code("authorization-response")
     private val user = """{"id": 1, "cognito_sub": "s", "email": "pat@example.com", "display_name": "Pat"}"""
     private val home = """{"id": 7, "name": "Elm Street", "zip_code": "80202", "home_type": "condo", "role": "owner"}"""
 
@@ -132,7 +131,7 @@ class SessionUseCasesTest {
     private fun session() = runBlocking { observeSession().first() }
 
     private fun signedIn() = runBlocking {
-        assertEquals(SignInResult.SignedIn, signIn(Intent()))
+        assertEquals(SignInResult.SignedIn, signIn(code))
     }
 
     @Test
@@ -144,7 +143,7 @@ class SessionUseCasesTest {
     fun `signing in sets up the profile and stores only the refresh token`() = runBlocking {
         routes["GET /households"] = { json("[]") }
 
-        assertEquals(SignInResult.SignedIn, signIn(Intent()))
+        assertEquals(SignInResult.SignedIn, signIn(code))
 
         val state = session() as SessionState.SignedIn
         assertEquals("pat@example.com", state.user.email)
@@ -160,7 +159,7 @@ class SessionUseCasesTest {
     fun `a sign-in whose access token expires during setup keeps its refresh token`() = runBlocking {
         authClient.exchange = { TokenSet("access-1", "id-1", "refresh-1", expiresAtMillis = 0) }
 
-        assertEquals(SignInResult.SignedIn, signIn(Intent()))
+        assertEquals(SignInResult.SignedIn, signIn(code))
 
         assertEquals("refresh-1", store.stored.first().refreshToken)
     }
@@ -169,7 +168,7 @@ class SessionUseCasesTest {
     fun `an account outside the beta is not kept signed in`() = runBlocking {
         routes["POST /auth/bootstrap"] = { status(403) }
 
-        assertEquals(SignInResult.NotInBeta, signIn(Intent()))
+        assertEquals(SignInResult.NotInBeta, signIn(code))
 
         assertEquals(SessionState.SignedOut(reason = null), session())
         assertNull(auth.accessToken())
@@ -179,7 +178,7 @@ class SessionUseCasesTest {
     fun `a sign-in that loses the connection half-way keeps nothing`() = runBlocking {
         routes["GET /households"] = { MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST) }
 
-        assertEquals(SignInResult.Offline, signIn(Intent()))
+        assertEquals(SignInResult.Offline, signIn(code))
 
         assertEquals(SessionState.SignedOut(reason = null), session())
         assertNull(profile.profile.first())
@@ -187,18 +186,15 @@ class SessionUseCasesTest {
 
     @Test
     fun `closing the sign-in page changes nothing`() = runBlocking {
-        authClient.exchange = { throw SignInCancelled() }
-
-        assertEquals(SignInResult.Cancelled, signIn(Intent()))
+        assertEquals(SignInResult.Cancelled, signIn(SignInPageResult.Cancelled))
         assertEquals(SessionState.SignedOut(reason = null), session())
     }
 
     @Test
     fun `trying to sign in again clears the last sign-out reason`() = runBlocking {
         store.clear(SignOutReason.ACCOUNT_DELETED)
-        authClient.exchange = { throw SignInCancelled() }
 
-        signIn(Intent())
+        signIn(SignInPageResult.Cancelled)
 
         assertEquals(SessionState.SignedOut(reason = null), session())
     }

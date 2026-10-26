@@ -7,7 +7,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
@@ -22,6 +21,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.rememberNavController
+import chat.homebuddy.core.auth.SignInPage
 import chat.homebuddy.designsystem.HomeBuddyTheme
 import chat.homebuddy.feature.auth.SessionViewModel
 import chat.homebuddy.feature.auth.SignInDestination
@@ -30,10 +30,14 @@ import chat.homebuddy.feature.documents.DocumentsDestination
 import chat.homebuddy.feature.documents.ManualLink
 import chat.homebuddy.feature.documents.parseManualLink
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 import kotlinx.serialization.json.Json
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject
+    lateinit var signInPage: SignInPage
+
     /** Something shared from another app, held until the signed-in app can open it (it may arrive signed out). */
     private var pendingShare by mutableStateOf<DocumentsDestination?>(null)
 
@@ -46,7 +50,7 @@ class MainActivity : ComponentActivity() {
             savedInstanceState.getString(PENDING_SHARE)?.let { Json.decodeFromString<DocumentsDestination>(it) }
         }
         setContent {
-            HomeBuddyTheme { HomeBuddyRoot(pendingShare = { pendingShare }, onShareOpened = { pendingShare = null }) }
+            HomeBuddyTheme { HomeBuddyRoot(signInPage, pendingShare = { pendingShare }, onShareOpened = { pendingShare = null }) }
         }
     }
 
@@ -88,15 +92,14 @@ private fun Intent.toShare(): DocumentsDestination? {
  */
 @Composable
 private fun HomeBuddyRoot(
+    signInPage: SignInPage,
     pendingShare: () -> DocumentsDestination?,
     onShareOpened: () -> Unit,
     viewModel: SessionViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val logoutUrl by viewModel.pendingLogoutUrl.collectAsStateWithLifecycle()
-    val signIn = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        viewModel.onSignInResult(result.data)
-    }
+    val signIn = rememberLauncherForActivityResult(signInPage, viewModel::onSignInResult)
     val context = LocalContext.current
     LaunchedEffect(logoutUrl) {
         logoutUrl?.let { url ->
@@ -115,7 +118,7 @@ private fun HomeBuddyRoot(
     ) {
         appDestinations(
             signInState = { state.signInScreen() },
-            onSignIn = { viewModel.onSignInClick()?.let(signIn::launch) },
+            onSignIn = { if (viewModel.onSignInClick()) signIn.launch(Unit) },
             pendingShare = pendingShare,
             onShareOpened = onShareOpened,
             onSignOut = viewModel::onSignOutClick,

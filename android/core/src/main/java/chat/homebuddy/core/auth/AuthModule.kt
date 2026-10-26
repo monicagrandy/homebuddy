@@ -25,6 +25,10 @@ object AuthModule {
 
     @Provides
     @Singleton
+    fun signInPage(service: AuthorizationService, config: AuthConfig): SignInPage = SignInPage(service, config)
+
+    @Provides
+    @Singleton
     fun authStore(@ApplicationContext context: Context): AuthStore = AuthStore(
         PreferenceDataStoreFactory.create { context.preferencesDataStoreFile("auth") },
         KeystoreCipher(),

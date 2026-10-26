@@ -1,9 +1,9 @@
 package chat.homebuddy.feature.auth
 
-import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.homebuddy.app.R
+import chat.homebuddy.core.auth.SignInPageResult
 import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.domain.ObserveSessionUseCase
 import chat.homebuddy.core.domain.RefreshProfileUseCase
@@ -85,22 +85,22 @@ class SessionViewModel @Inject constructor(
     }
 
     /**
-     * The sign-in page to open, or null when the button retried loading the profile instead
-     * (signed in, but the profile couldn't be fetched yet).
+     * True when the screen should open the sign-in page; false when the button retried loading
+     * the profile instead (signed in, but the profile couldn't be fetched yet).
      */
-    fun onSignInClick(): Intent? {
+    fun onSignInClick(): Boolean {
         if (session.value == SessionState.Loading) {
             loadProfile()
-            return null
+            return false
         }
         signInError.value = null
-        return signIn.intent()
+        return true
     }
 
-    fun onSignInResult(data: Intent?) {
+    fun onSignInResult(page: SignInPageResult) {
         signingIn.value = true
         viewModelScope.launch {
-            signInError.value = when (signIn(data)) {
+            signInError.value = when (signIn(page)) {
                 SignInResult.SignedIn, SignInResult.Cancelled -> null
                 SignInResult.NotInBeta -> uiText(R.string.sign_in_not_in_beta)
                 SignInResult.Offline -> uiText(R.string.error_offline)

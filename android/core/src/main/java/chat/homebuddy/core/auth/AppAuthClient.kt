@@ -1,20 +1,18 @@
 package chat.homebuddy.core.auth
 
-import android.content.Intent
 import android.net.Uri
 import java.io.IOException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import net.openid.appauth.AuthorizationException
-import net.openid.appauth.AuthorizationRequest
 import net.openid.appauth.AuthorizationResponse
 import net.openid.appauth.AuthorizationService
 import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.GrantTypeValues
-import net.openid.appauth.ResponseTypeValues
 import net.openid.appauth.TokenRequest
 import net.openid.appauth.TokenResponse
+import org.json.JSONException
 
 /** [AuthClient] on AppAuth. PKCE is added by AppAuth automatically. */
 class AppAuthClient(
@@ -22,28 +20,13 @@ class AppAuthClient(
     private val service: AuthorizationService,
     private val config: AuthConfig,
 ) : AuthClient {
-    private val serviceConfig = AuthorizationServiceConfiguration(
-        Uri.parse("${config.cognitoDomain.trimEnd('/')}/oauth2/authorize"),
-        Uri.parse("${config.cognitoDomain.trimEnd('/')}/oauth2/token"),
-    )
+    private val serviceConfig = config.serviceConfiguration()
 
-    override fun signInIntent(): Intent {
-        val request = AuthorizationRequest.Builder(
-            serviceConfig,
-            config.clientId,
-            ResponseTypeValues.CODE,
-            Uri.parse(config.redirectUri),
-        ).setScopes(config.scopes).build()
-        return service.getAuthorizationRequestIntent(request)
-    }
-
-    override suspend fun exchange(result: Intent?): TokenSet {
-        val data = result ?: throw SignInCancelled()
-        val response = AuthorizationResponse.fromIntent(data)
-        val error = AuthorizationException.fromIntent(data)
-        if (response == null) {
-            if (error?.code == AuthorizationException.GeneralErrors.USER_CANCELED_AUTH_FLOW.code) throw SignInCancelled()
-            throw SignInFailed(error?.errorDescription ?: "Sign-in failed.", error)
+    override suspend fun exchange(code: SignInPageResult.Code): TokenSet {
+        val response = try {
+            AuthorizationResponse.jsonDeserialize(code.response)
+        } catch (failure: JSONException) {
+            throw SignInFailed("Sign-in returned an unreadable response.", failure)
         }
         val tokens = try {
             request(response.createTokenExchangeRequest())
@@ -88,6 +71,12 @@ class AppAuthClient(
         }
     }
 }
+
+/** Cognito's authorize and token endpoints, for [AppAuthClient] and [SignInPage]. */
+internal fun AuthConfig.serviceConfiguration() = AuthorizationServiceConfiguration(
+    Uri.parse("${cognitoDomain.trimEnd('/')}/oauth2/authorize"),
+    Uri.parse("${cognitoDomain.trimEnd('/')}/oauth2/token"),
+)
 
 private fun AuthorizationException.isNetworkError(): Boolean =
     type == AuthorizationException.TYPE_GENERAL_ERROR && code == AuthorizationException.GeneralErrors.NETWORK_ERROR.code

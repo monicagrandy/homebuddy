@@ -1,6 +1,5 @@
 package chat.homebuddy.core.auth
 
-import android.content.Intent
 import java.io.IOException
 
 data class AuthConfig(
@@ -22,20 +21,28 @@ data class TokenSet(
     val expiresAtMillis: Long?,
 )
 
-class SignInCancelled : Exception("Sign-in was cancelled.")
-
 class SignInFailed(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * What the hosted sign-in page returned, read off its Intent by [SignInPage] so that nothing past
+ * the screen handles Android types.
+ */
+sealed interface SignInPageResult {
+    /** The authorization response, to exchange for tokens. Only [AuthClient] reads it. */
+    data class Code(val response: String) : SignInPageResult
+
+    data object Cancelled : SignInPageResult
+
+    data object Failed : SignInPageResult
+}
 
 /**
  * The OAuth calls (Cognito hosted UI, auth code + PKCE). It holds no state, and sits behind an
  * interface so the AppAuth library, last released in 2021, can be swapped without touching the rest.
  */
 interface AuthClient {
-    /** Opens the hosted sign-in page in a Custom Tab. */
-    fun signInIntent(): Intent
-
-    /** Exchanges the code the Custom Tab returned for tokens. Throws [SignInCancelled], [SignInFailed] or [IOException]. */
-    suspend fun exchange(result: Intent?): TokenSet
+    /** Exchanges the code the sign-in page returned for tokens. Throws [SignInFailed] or [IOException]. */
+    suspend fun exchange(code: SignInPageResult.Code): TokenSet
 
     /**
      * New tokens for [refreshToken]; their refresh token is null unless the server rotated it.

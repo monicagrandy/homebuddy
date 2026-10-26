@@ -1,10 +1,9 @@
 package chat.homebuddy.core.domain
 
-import android.content.Intent
 import chat.homebuddy.core.auth.AuthRepository
 import chat.homebuddy.core.auth.AuthState
-import chat.homebuddy.core.auth.SignInCancelled
 import chat.homebuddy.core.auth.SignInFailed
+import chat.homebuddy.core.auth.SignInPageResult
 import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.data.ConversationsRepository
 import chat.homebuddy.core.data.DocumentsRepository
@@ -52,16 +51,16 @@ class SignInUseCase @Inject constructor(
     private val auth: AuthRepository,
     private val profile: ProfileRepository,
 ) {
-    /** The hosted sign-in page, opened in a Custom Tab. Its result goes to [invoke]. */
-    fun intent(): Intent = auth.signInIntent()
-
     /** Exchanges the code, sets up the profile, and only then keeps the session, so a failure leaves nothing behind. */
-    suspend operator fun invoke(result: Intent?): SignInResult {
+    suspend operator fun invoke(page: SignInPageResult): SignInResult {
         auth.clearSignOutReason()
+        val code = when (page) {
+            is SignInPageResult.Code -> page
+            SignInPageResult.Cancelled -> return SignInResult.Cancelled
+            SignInPageResult.Failed -> return SignInResult.Failed
+        }
         val tokens = try {
-            auth.exchangeCode(result)
-        } catch (_: SignInCancelled) {
-            return SignInResult.Cancelled
+            auth.exchangeCode(code)
         } catch (_: IOException) {
             return SignInResult.Offline
         } catch (_: SignInFailed) {

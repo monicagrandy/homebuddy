@@ -45,7 +45,7 @@ UI text lives in `app/src/main/res/values/strings.xml`. ViewModels hand screens 
 
 ## Sign-in and devices
 
-- Sign-in uses Cognito's hosted UI in a Custom Tab (auth code + PKCE).
+- Sign-in uses Cognito's hosted UI in a Custom Tab (auth code + PKCE). `SignInPage`, an `ActivityResultContract`, is the only sign-in code that handles Intents; the ViewModel and use cases get a plain `SignInPageResult`.
 - Nothing holds the session in memory. Being signed in means a refresh token is stored (encrypted with a Keystore key, in DataStore); the profile is cached in Room. `ObserveSessionUseCase` derives the session from those two.
 - Only the refresh token is written to disk. The access token lives in memory and is refreshed when it's about to expire.
 - Each phone keeps its own tokens, so one account can be signed in on several devices.

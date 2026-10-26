@@ -49,6 +49,8 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.appauth)
+    // SignInPage is an ActivityResultContract, so the screen never handles the page's Intents itself.
+    implementation(libs.androidx.activity)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

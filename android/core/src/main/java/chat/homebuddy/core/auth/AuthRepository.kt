@@ -1,6 +1,5 @@
 package chat.homebuddy.core.auth
 
-import android.content.Intent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -28,14 +27,12 @@ class AuthRepository(
 
     suspend fun isSignedIn(): Boolean = state.first() == AuthState.SignedIn
 
-    fun signInIntent(): Intent = client.signInIntent()
-
     /**
-     * Exchanges the sign-in result for tokens and keeps them in memory only, so the profile can be
+     * Exchanges the sign-in page's code for tokens and keeps them in memory only, so the profile can be
      * set up with them. Nothing is saved until [keepSignedIn], so a sign-in that fails half-way
      * leaves no session behind.
      */
-    suspend fun exchangeCode(result: Intent?): TokenSet = client.exchange(result).also(cache::put)
+    suspend fun exchangeCode(code: SignInPageResult.Code): TokenSet = client.exchange(code).also(cache::put)
 
     /** Saves the sign-in [exchangeCode] started, which makes this phone signed in. */
     suspend fun keepSignedIn() {
