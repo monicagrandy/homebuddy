@@ -19,6 +19,9 @@ class TestProfileRepository : ProfileRepository {
     )
     var failure: Exception? = null
 
+    /** Runs at the start of each call to the server, so a test can hold one in flight. */
+    var whileCalling: suspend () -> Unit = {}
+
     /** The ID and access tokens of the last sign-in. */
     var bootstrappedWith: Pair<String, String>? = null
         private set
@@ -36,14 +39,14 @@ class TestProfileRepository : ProfileRepository {
     override suspend fun refresh() = fetch()
 
     override suspend fun createHousehold(name: String, zipCode: String, homeType: String) {
-        failure?.let { throw it }
+        callServer()
         val id = (server.households.maxOfOrNull { it.id } ?: 0) + 1
         server = server.copy(households = server.households + Household(id, name, zipCode, homeType, role = "owner"))
         cached.value = cached.value?.copy(households = server.households)
     }
 
     override suspend fun deleteAccount() {
-        failure?.let { throw it }
+        callServer()
         deleted = true
     }
 
@@ -51,8 +54,13 @@ class TestProfileRepository : ProfileRepository {
         cached.value = null
     }
 
-    private fun fetch() {
-        failure?.let { throw it }
+    private suspend fun fetch() {
+        callServer()
         cached.value = server
+    }
+
+    private suspend fun callServer() {
+        whileCalling()
+        failure?.let { throw it }
     }
 }
