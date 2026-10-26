@@ -6,6 +6,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -59,10 +60,16 @@ class SignedInScopeTest {
     }
 
     @Test
-    fun `back in the signed-in app is left to the system, which closes the app`() {
+    fun `back after signing in closes the app instead of returning to sign-in`() {
         setUpApp()
-
+        // Nothing in the app handles back, so the system does.
         assertFalse(compose.activity.onBackPressedDispatcher.hasEnabledCallbacks())
+
+        compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+
+        assertTrue(compose.activity.isFinishing)
+        assertTrue(root.currentDestination?.hasRoute<MainDestination>() == true)
     }
 
     @Test

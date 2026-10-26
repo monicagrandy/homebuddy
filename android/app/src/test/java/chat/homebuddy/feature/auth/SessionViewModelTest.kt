@@ -1,6 +1,10 @@
 package chat.homebuddy.feature.auth
 
 import androidx.annotation.StringRes
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import chat.homebuddy.app.MainDispatcherRule
 import chat.homebuddy.app.R
 import chat.homebuddy.core.auth.SignInPageResult
@@ -99,6 +103,19 @@ class SessionViewModelTest {
         assertEquals(AppUiState.SignedOut(SignInUiState.InProgress), viewModel.state.value)
         tokens.complete(TokenSet("access-1", "id-1", "refresh-1", expiresAtMillis = null))
         assertEquals(AppUiState.Main, viewModel.state.value)
+    }
+
+    @Test
+    fun `leaving the app after signing in keeps you signed in`() = runTest {
+        val activity = ViewModelStore()
+        val viewModel = ViewModelProvider.create(activity, viewModelFactory { initializer { launch() } })[SessionViewModel::class]
+        viewModel.onSignInResult(CODE)
+        assertEquals(AppUiState.Main, viewModel.state.value)
+
+        // Back from the signed-in app closes it (see SignedInScopeTest), which clears its ViewModels.
+        activity.clear()
+
+        assertEquals(AppUiState.Main, launch().state.value)
     }
 
     @Test
