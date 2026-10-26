@@ -31,8 +31,15 @@ Two modules, so the one boundary that matters is enforced: screens can't reach D
 
 | Module | Packages | What it holds |
 |---|---|---|
-| `:core` | `core.network`, `core.auth`, `core.data`, `core.domain` (+ `core.testing` test fixtures) | Retrofit API and models mirroring `backend/schemas.py`, the SSE stream client, sign-in and token storage, the Room cache, the upload worker, stateless repositories, and the use cases that combine them (sign in, sign out, delete account, observe the session) |
+| `:core` | `core.network`, `core.auth`, `core.data` (with `.profile`, `.documents`, `.conversations`), `core.domain` (+ `core.testing` test fixtures) | Retrofit API and models mirroring `backend/schemas.py`, the SSE stream client, sign-in and token storage, the Room cache, the upload worker, stateless repositories, and the use cases that combine them (sign in, sign out, delete account, observe the session) |
 | `:app` | `app`, `designsystem`, `feature.auth`, `feature.home`, `feature.documents`, `feature.chat`, `feature.account` | Screens, ViewModels, the theme, the activity, Hilt setup, flavors and the manifest |
+
+In the data layer, a repository never touches a DAO or the API itself. Each feature package in `core.data` has:
+- a repository interface and its `Cached…Repository` implementation
+- a local data source over its Room DAOs
+- a remote data source over `HomeBuddyApi` (and, for conversations, the SSE stream)
+
+Every data source is an interface with one implementation. Remote data sources handle HTTP status codes: a 404 on delete counts as done, and a missing thread or job comes back as `null`. Repositories never see Retrofit's `Response`. Room's entities, DAOs and database stay in `core.data`, so the exported schema files don't move.
 
 Each feature declares its typed Navigation Compose destinations next to its screens (`SignInNavigation.kt`, `ChatNavigation.kt`, `DocumentsNavigation.kt` and so on). There are two `NavHost`s:
 
@@ -66,6 +73,18 @@ Unit, contract, integration (MockWebServer) and screenshot (Roborazzi) tests run
 
 The manual checklist, for what automated tests can't cover (real sign-in, two phones, QR codes, voice), is in `../docs/android-testing.md`. Releasing to Google Play is in `RELEASE.md`.
 
-ViewModels don't depend on Android types, and their tests run on the plain JVM: the real ViewModel and use cases on the test repositories in `:core`'s test fixtures (`TestProfileRepository` and the others). That keeps anything that could hold a Context or a lifecycle out of them. Robolectric is only for code that really uses Android, such as the Room-backed `Cached…Repository` classes and screenshots.
+Unit tests stay light: everything below runs on the plain JVM except where it says Robolectric. ViewModels don't depend on Android types, which keeps anything that could hold a Context or a lifecycle out of them.
+
+| Layer | Tests | Runs on | Fakes |
+|---|---|---|---|
+| Room DAOs | `ProfileDaoTest`, `DocumentDaoTest`, `ConversationDaoTest`: the SQL itself | Robolectric (in-memory Room) | none |
+| Local data sources | `Room…LocalDataSourceTest` | JVM | fake DAOs (`FakeDaos.kt`) |
+| Remote data sources | `Retrofit…RemoteDataSourceTest`: requests and status handling | JVM | MockWebServer |
+| Repositories, upload processor | `Cached…RepositoryTest`, `UploadProcessorTest` | JVM | `Test…DataSources.kt` in each feature's test package |
+| Use cases, auth | `SessionUseCasesTest`, `NetworkSessionTest`, `AuthRepositoryTest`, `AuthStoreTest` | JVM | the test repositories in `:core`'s test fixtures (`TestProfileRepository` and the others) |
+| ViewModels | `SessionViewModelTest` | JVM | the same test repositories |
+| Screens, navigation | screenshot tests, `AppNavigationTest`, `MainNavigationTest`, `SignedInScopeTest` | Robolectric | none |
+
+The test doubles fake only what some test has needed so far. Anything else fails loudly with `notFaked()`, so add it to the double when a test needs it. `ConversationViewModelTest` still runs on Robolectric against real Room until it moves to the test repositories.
 
 The contract tests read the backend's recorded responses from `../contracts/fixtures`. When the backend changes its API it regenerates those (`python scripts/export_contract.py`), and these tests show whether the app still understands them.
