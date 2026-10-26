@@ -4,7 +4,6 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.navigation.toRoute
 import chat.homebuddy.app.R
 import chat.homebuddy.core.data.conversations.ConversationsRepository
 import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
@@ -13,10 +12,12 @@ import chat.homebuddy.core.network.toApiError
 import chat.homebuddy.designsystem.UiText
 import chat.homebuddy.designsystem.asUiText
 import chat.homebuddy.designsystem.uiText
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.IOException
 import java.util.UUID
-import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,15 +32,19 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
-/** One thread, scoped to its screen: leaving it stops the answer (the server still finishes and saves it). */
-@HiltViewModel
-class ConversationViewModel @Inject constructor(
+/**
+ * One thread, scoped to its screen: leaving it stops the answer (the server still finishes and
+ * saves it). The nav graph decodes [ConversationDestination] and passes its id in, so this class
+ * doesn't depend on Navigation.
+ */
+@HiltViewModel(assistedFactory = ConversationViewModel.Factory::class)
+class ConversationViewModel @AssistedInject constructor(
+    /** The thread to open; null starts a new one. */
+    @Assisted private val opened: String?,
     savedStateHandle: SavedStateHandle,
     observeCurrentHousehold: ObserveCurrentHouseholdUseCase,
     private val repository: ConversationsRepository,
 ) : ViewModel() {
-    private val opened = savedStateHandle.toRoute<ConversationDestination>().id
-
     /** A new thread's id is made up here, and kept across process death until the server adopts it. */
     private val id: String = opened
         ?: savedStateHandle.get<String>(NEW_ID)
@@ -154,6 +159,11 @@ class ConversationViewModel @Inject constructor(
 
     private fun updateLast(transform: (ChatTurn) -> ChatTurn) {
         turns.update { current -> if (current.isEmpty()) current else current.dropLast(1) + transform(current.last()) }
+    }
+
+    @AssistedFactory
+    interface Factory {
+        fun create(opened: String?): ConversationViewModel
     }
 
     private data class Inputs(val draft: String, val listening: Boolean, val voiceAvailable: Boolean, val message: UiText?)

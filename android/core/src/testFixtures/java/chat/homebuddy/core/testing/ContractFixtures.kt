@@ -1,5 +1,8 @@
 package chat.homebuddy.core.testing
 
+import chat.homebuddy.core.network.SseParser
+import chat.homebuddy.core.network.StreamEvent
+import chat.homebuddy.core.network.parseStreamEvent
 import java.io.File
 
 /**
@@ -16,4 +19,11 @@ object ContractFixtures {
     fun read(name: String): String = File(dir, name).readText()
 
     fun names(): List<String> = dir.list().orEmpty().sorted()
+
+    /** A recorded answer stream (an .sse transcript), as the events the app receives. */
+    fun streamEvents(name: String): List<StreamEvent> {
+        val parser = SseParser()
+        val data = read(name).lines().mapNotNull(parser::feed) + listOfNotNull(parser.finish())
+        return data.mapNotNull(::parseStreamEvent)
+    }
 }

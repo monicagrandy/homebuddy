@@ -122,8 +122,6 @@ dependencies {
     testImplementation(libs.roborazzi.compose)
     testImplementation(libs.roborazzi.junit.rule)
     testImplementation(libs.androidx.compose.ui.test.junit4)
-    testImplementation(libs.androidx.room.runtime)
     testImplementation(libs.androidx.test.core)
-    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.androidx.navigation.testing)
 }

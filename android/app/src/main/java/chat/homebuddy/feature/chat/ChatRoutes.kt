@@ -75,10 +75,10 @@ fun ConversationListRoute(
 
 @Composable
 fun ConversationRoute(
+    viewModel: ConversationViewModel,
     onBack: () -> Unit,
     onGone: () -> Unit,
     modifier: Modifier = Modifier,
-    viewModel: ConversationViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val gone by viewModel.gone.collectAsStateWithLifecycle()

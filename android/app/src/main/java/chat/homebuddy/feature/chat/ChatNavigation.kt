@@ -1,11 +1,13 @@
 package chat.homebuddy.feature.chat
 
 import androidx.compose.runtime.getValue
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.navigation.NavController
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
+import androidx.navigation.toRoute
 import kotlinx.serialization.Serializable
 
 /** The chat tab: the conversation list. */
@@ -29,8 +31,10 @@ fun NavGraphBuilder.chatDestinations(navController: NavController) {
             onConversationGoneShown = { entry.savedStateHandle[CONVERSATION_GONE] = false },
         )
     }
-    composable<ConversationDestination> {
+    composable<ConversationDestination> { entry ->
+        val opened = entry.toRoute<ConversationDestination>().id
         ConversationRoute(
+            viewModel = hiltViewModel<ConversationViewModel, ConversationViewModel.Factory> { it.create(opened) },
             // Ignores a second tap while the screen is already leaving.
             onBack = dropUnlessResumed { navController.popBackStack() },
             onGone = {
