@@ -3,7 +3,7 @@ package chat.homebuddy.feature.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.homebuddy.app.R
-import chat.homebuddy.core.data.ProfileRepository
+import chat.homebuddy.core.data.profile.ProfileRepository
 import chat.homebuddy.core.network.toApiError
 import chat.homebuddy.designsystem.asUiText
 import chat.homebuddy.designsystem.uiText

@@ -3,7 +3,7 @@ package chat.homebuddy.feature.account
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.homebuddy.app.R
-import chat.homebuddy.core.data.ProfileRepository
+import chat.homebuddy.core.data.profile.ProfileRepository
 import chat.homebuddy.core.domain.DeleteAccountResult
 import chat.homebuddy.core.domain.DeleteAccountUseCase
 import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase

@@ -5,10 +5,12 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import chat.homebuddy.app.R
 import chat.homebuddy.core.data.CachedConversationsRepository
-import chat.homebuddy.core.data.CachedProfileRepository
 import chat.homebuddy.core.data.ConversationsRepository
 import chat.homebuddy.core.data.HomeBuddyDatabase
-import chat.homebuddy.core.data.ProfileRepository
+import chat.homebuddy.core.data.profile.CachedProfileRepository
+import chat.homebuddy.core.data.profile.ProfileRepository
+import chat.homebuddy.core.data.profile.RetrofitProfileRemoteDataSource
+import chat.homebuddy.core.data.profile.RoomProfileLocalDataSource
 import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
 import chat.homebuddy.core.network.AccessTokenProvider
 import chat.homebuddy.core.network.ApiConfig
@@ -86,7 +88,7 @@ class ConversationViewModelTest {
         val client = buildHttpClient(config, Provider<AccessTokenProvider> { SignedIn })
         val api = buildApi(config, client)
         database = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HomeBuddyDatabase::class.java).build()
-        profile = CachedProfileRepository(api, database.profile())
+        profile = CachedProfileRepository(RetrofitProfileRemoteDataSource(api), RoomProfileLocalDataSource(database.profile()))
         profile.refresh()
         conversations = CachedConversationsRepository(api, QueryStreamClient(client, config), database.conversations())
         viewModel = conversation()

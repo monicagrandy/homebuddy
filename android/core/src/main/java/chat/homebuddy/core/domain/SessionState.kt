@@ -1,8 +1,8 @@
 package chat.homebuddy.core.domain
 
 import chat.homebuddy.core.auth.SignOutReason
-import chat.homebuddy.core.data.Household
-import chat.homebuddy.core.data.User
+import chat.homebuddy.core.data.profile.Household
+import chat.homebuddy.core.data.profile.User
 
 /** Where the app stands, derived from what's stored (see [ObserveSessionUseCase]); nothing holds it in memory. */
 sealed interface SessionState {

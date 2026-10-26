@@ -7,9 +7,9 @@ import chat.homebuddy.core.auth.SignInPageResult
 import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.data.ConversationsRepository
 import chat.homebuddy.core.data.DocumentsRepository
-import chat.homebuddy.core.data.Household
-import chat.homebuddy.core.data.ProfileRepository
-import chat.homebuddy.core.network.parseApiError
+import chat.homebuddy.core.data.profile.Household
+import chat.homebuddy.core.data.profile.ProfileRepository
+import chat.homebuddy.core.network.toApiError
 import java.io.IOException
 import javax.inject.Inject
 import kotlinx.coroutines.NonCancellable
@@ -172,13 +172,12 @@ class DeleteAccountUseCase @Inject constructor(
     private val endSession: EndSessionUseCase,
 ) {
     suspend operator fun invoke(): DeleteAccountResult {
-        val response = try {
+        try {
             profile.deleteAccount()
         } catch (_: IOException) {
             return DeleteAccountResult.Offline
-        }
-        if (!response.isSuccessful) {
-            return DeleteAccountResult.Failed(parseApiError(response.code(), response.errorBody()?.string()).message)
+        } catch (error: HttpException) {
+            return DeleteAccountResult.Failed(error.toApiError().message)
         }
         // The account is gone on the server; this phone still has to end its session like any other.
         endSession(SignOutReason.ACCOUNT_DELETED)

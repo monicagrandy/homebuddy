@@ -9,13 +9,15 @@ import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.auth.TokenSet
 import chat.homebuddy.core.data.CachedConversationsRepository
 import chat.homebuddy.core.data.CachedDocumentsRepository
-import chat.homebuddy.core.data.CachedProfileRepository
 import chat.homebuddy.core.data.DocumentEntity
 import chat.homebuddy.core.data.FakeScheduler
 import chat.homebuddy.core.data.HomeBuddyDatabase
-import chat.homebuddy.core.data.ProfileRepository
 import chat.homebuddy.core.data.UploadFiles
 import chat.homebuddy.core.data.inMemoryDatabase
+import chat.homebuddy.core.data.profile.CachedProfileRepository
+import chat.homebuddy.core.data.profile.ProfileRepository
+import chat.homebuddy.core.data.profile.RetrofitProfileRemoteDataSource
+import chat.homebuddy.core.data.profile.RoomProfileLocalDataSource
 import chat.homebuddy.core.network.ApiConfig
 import chat.homebuddy.core.network.QueryStreamClient
 import chat.homebuddy.core.network.buildApi
@@ -97,7 +99,7 @@ class SessionUseCasesTest {
         val config = ApiConfig(baseUrl = server.url("/").toString(), clientHeader = "android/test")
         val http = buildHttpClient(config, Provider { session })
         val api = buildApi(config, http)
-        profile = CachedProfileRepository(api, database.profile())
+        profile = CachedProfileRepository(RetrofitProfileRemoteDataSource(api), RoomProfileLocalDataSource(database.profile()))
         val documents = CachedDocumentsRepository(api, database.documents(), database.uploads(), UploadFiles(folder.newFolder("uploads")), FakeScheduler())
         val conversations = CachedConversationsRepository(api, QueryStreamClient(http, config), database.conversations())
         val endSession = EndSessionUseCase(auth, profile, documents, conversations)

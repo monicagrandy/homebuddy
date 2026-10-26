@@ -1,7 +1,8 @@
-package chat.homebuddy.core.data
+package chat.homebuddy.core.data.profile
 
+import java.io.IOException
 import kotlinx.coroutines.flow.Flow
-import retrofit2.Response
+import retrofit2.HttpException
 
 data class User(val id: Int, val email: String, val displayName: String?)
 
@@ -21,8 +22,11 @@ interface ProfileRepository {
 
     suspend fun createHousehold(name: String, zipCode: String, homeType: String)
 
-    /** 204 when the account is gone; 502 when its data is gone but closing the sign-in failed (safe to retry). */
-    suspend fun deleteAccount(): Response<Unit>
+    /**
+     * Deletes the account on the server. Throws [HttpException] if it couldn't (a 502 means its data
+     * is gone but closing the sign-in failed, so it's safe to retry), or [IOException] offline.
+     */
+    suspend fun deleteAccount()
 
     suspend fun clear()
 }

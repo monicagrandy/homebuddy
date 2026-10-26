@@ -1,12 +1,11 @@
 package chat.homebuddy.core.testing
 
-import chat.homebuddy.core.data.Household
-import chat.homebuddy.core.data.Profile
-import chat.homebuddy.core.data.ProfileRepository
-import chat.homebuddy.core.data.User
+import chat.homebuddy.core.data.profile.Household
+import chat.homebuddy.core.data.profile.Profile
+import chat.homebuddy.core.data.profile.ProfileRepository
+import chat.homebuddy.core.data.profile.User
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import retrofit2.Response
 
 /**
  * [ProfileRepository] in memory, for ViewModel tests on the JVM. [server] is the account the
@@ -29,7 +28,7 @@ class TestProfileRepository : ProfileRepository {
 
     override suspend fun createHousehold(name: String, zipCode: String, homeType: String) = notFaked()
 
-    override suspend fun deleteAccount(): Response<Unit> = notFaked()
+    override suspend fun deleteAccount() = notFaked()
 
     override suspend fun clear() {
         cached.value = null

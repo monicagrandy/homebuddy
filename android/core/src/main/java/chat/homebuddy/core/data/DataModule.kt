@@ -2,6 +2,10 @@ package chat.homebuddy.core.data
 
 import android.content.Context
 import androidx.room.Room
+import chat.homebuddy.core.data.profile.CachedProfileRepository
+import chat.homebuddy.core.data.profile.ProfileRepository
+import chat.homebuddy.core.data.profile.RetrofitProfileRemoteDataSource
+import chat.homebuddy.core.data.profile.RoomProfileLocalDataSource
 import chat.homebuddy.core.network.HomeBuddyApi
 import chat.homebuddy.core.network.QueryStreamClient
 import dagger.Module
@@ -48,7 +52,7 @@ object DataModule {
     @Provides
     @Singleton
     fun profileRepository(api: HomeBuddyApi, database: HomeBuddyDatabase): ProfileRepository =
-        CachedProfileRepository(api, database.profile())
+        CachedProfileRepository(RetrofitProfileRemoteDataSource(api), RoomProfileLocalDataSource(database.profile()))
 
     @Provides
     @Singleton
