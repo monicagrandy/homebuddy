@@ -6,6 +6,7 @@ import chat.homebuddy.core.data.UploadState
 import chat.homebuddy.core.data.upload
 import chat.homebuddy.core.testing.httpError
 import java.io.File
+import java.io.IOException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -24,6 +25,7 @@ class CachedDocumentsRepositoryTest {
 
     private val remote = TestDocumentsRemoteDataSource()
     private val local = TestDocumentsLocalDataSource()
+    private val picked = TestPickedFileDataSource().apply { contents[MANUAL] = "%PDF-1.4" }
     private val scheduler = FakeScheduler()
     private lateinit var uploadsDir: File
     private lateinit var repository: CachedDocumentsRepository
@@ -31,7 +33,7 @@ class CachedDocumentsRepositoryTest {
     @Before
     fun setUp() {
         uploadsDir = folder.newFolder("uploads")
-        repository = CachedDocumentsRepository(remote, local, UploadFiles(uploadsDir), scheduler, clock = { 42L }, newId = { "upload-1" })
+        repository = CachedDocumentsRepository(remote, local, picked, UploadFiles(uploadsDir), scheduler, clock = { 42L }, newId = { "upload-1" })
     }
 
     private suspend fun cached() = repository.documents(7).first().map { it.entryId }
@@ -73,13 +75,30 @@ class CachedDocumentsRepositoryTest {
 
     @Test
     fun `adding a file copies it, records it, and schedules the upload`() = runTest {
-        val id = repository.addFile(7, "Bosch manual", "%PDF-1.4".byteInputStream())
+        val id = repository.addFile(7, "Bosch manual", MANUAL)
 
         val upload = repository.uploads(7).first().single()
         assertEquals(UploadState.QUEUED, upload.state)
         assertEquals(42L, upload.createdAt)
         assertEquals("%PDF-1.4", File(upload.filePath!!).readText())
         assertEquals(listOf(id), scheduler.scheduled)
+    }
+
+    @Test
+    fun `a file that can't be read isn't added`() = runTest {
+        val error = runCatching { repository.addFile(7, "Bosch manual", "content://gone/1") }.exceptionOrNull()
+
+        assertTrue(error is IOException)
+        assertTrue(repository.uploads(7).first().isEmpty())
+        assertTrue(scheduler.scheduled.isEmpty())
+    }
+
+    @Test
+    fun `a picked file's name comes from the app that shared it`() = runTest {
+        picked.names[MANUAL] = "Bosch_SHX3AR75UC.pdf"
+
+        assertEquals("Bosch_SHX3AR75UC.pdf", repository.fileName(MANUAL))
+        assertNull(repository.fileName("content://unnamed/1"))
     }
 
     @Test
@@ -114,7 +133,7 @@ class CachedDocumentsRepositoryTest {
 
     @Test
     fun `dismissing cancels the work and deletes the copy`() = runTest {
-        repository.addFile(7, "Bosch manual", "%PDF-1.4".byteInputStream())
+        repository.addFile(7, "Bosch manual", MANUAL)
         val copy = File(local.upload("upload-1")!!.filePath!!)
 
         repository.dismiss("upload-1")
@@ -127,7 +146,7 @@ class CachedDocumentsRepositoryTest {
     @Test
     fun `wiping removes everything this account left on the phone`() = runTest {
         cache("bosch-manual")
-        repository.addFile(7, "Bosch manual", "%PDF-1.4".byteInputStream())
+        repository.addFile(7, "Bosch manual", MANUAL)
 
         repository.wipe()
 
@@ -135,5 +154,9 @@ class CachedDocumentsRepositoryTest {
         assertTrue(repository.uploads(7).first().isEmpty())
         assertFalse(uploadsDir.exists())
         assertTrue(scheduler.cancelledAll)
+    }
+
+    private companion object {
+        const val MANUAL = "content://downloads/bosch-manual"
     }
 }

@@ -4,16 +4,20 @@ import chat.homebuddy.core.data.DocumentEntity
 import chat.homebuddy.core.data.UploadEntity
 import chat.homebuddy.core.data.UploadState
 import chat.homebuddy.core.network.DocumentDto
-import java.io.InputStream
 import java.util.UUID
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 
 /** [DocumentsRepository] as a cache of the server's list, with uploads queued in the background. */
 class CachedDocumentsRepository(
     private val remote: DocumentsRemoteDataSource,
     private val local: DocumentsLocalDataSource,
+    private val picked: PickedFileDataSource,
     private val files: UploadFiles,
     private val scheduler: UploadScheduler,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
     private val clock: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
 ) : DocumentsRepository {
@@ -30,9 +34,10 @@ class CachedDocumentsRepository(
         local.deleteDocument(householdId, entryId)
     }
 
-    override suspend fun addFile(householdId: Int, displayName: String, content: InputStream, docType: String): String {
+    override suspend fun addFile(householdId: Int, displayName: String, uri: String, docType: String): String {
         val id = newId()
-        val copy = files.save(id, content)
+        // Copied now, while the app still has permission to read it; the upload may run much later.
+        val copy = withContext(io) { files.save(id, picked.open(uri)) }
         local.saveUpload(
             UploadEntity(
                 id = id,
@@ -48,6 +53,8 @@ class CachedDocumentsRepository(
         scheduler.schedule(id)
         return id
     }
+
+    override suspend fun fileName(uri: String) = picked.displayName(uri)
 
     override suspend fun addLink(householdId: Int, displayName: String, url: String, docType: String): String {
         val id = newId()

@@ -21,12 +21,16 @@ data class UploadItem(
     val openUrl: String? = null,
 )
 
+/** A file picked, or shared from another app, waiting for the user to name it. */
+data class PickedFile(val uri: String, val suggestedName: String?)
+
 data class DocumentsUiState(
     val documents: List<DocumentItem> = emptyList(),
     val uploads: List<UploadItem> = emptyList(),
     val refreshing: Boolean = false,
     val loaded: Boolean = false,
     val message: UiText? = null,
+    val picked: PickedFile? = null,
 ) {
     val isEmpty: Boolean get() = loaded && documents.isEmpty() && uploads.isEmpty()
 }

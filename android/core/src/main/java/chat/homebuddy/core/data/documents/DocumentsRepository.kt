@@ -2,7 +2,7 @@ package chat.homebuddy.core.data.documents
 
 import chat.homebuddy.core.data.DocumentEntity
 import chat.homebuddy.core.data.UploadEntity
-import java.io.InputStream
+import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 
 /** Schedules the background work that uploads a document (WorkManager in the app, a fake in tests). */
@@ -25,8 +25,15 @@ interface DocumentsRepository {
     /** Deleting something already deleted elsewhere (404) counts as done. */
     suspend fun delete(householdId: Int, entryId: String)
 
-    /** Copies [content] and queues its upload; returns the upload's id. */
-    suspend fun addFile(householdId: Int, displayName: String, content: InputStream, docType: String = "manual"): String
+    /**
+     * Copies the picked or shared file at [uri] (a content:// address) and queues its upload;
+     * returns the upload's id. Throws [UploadFiles.FileTooLarge], or [IOException] when the file
+     * can't be read.
+     */
+    suspend fun addFile(householdId: Int, displayName: String, uri: String, docType: String = "manual"): String
+
+    /** The name the app that shared the file at [uri] gives it, or null. */
+    suspend fun fileName(uri: String): String?
 
     /** Queues an import of the PDF at [url]; returns the upload's id. */
     suspend fun addLink(householdId: Int, displayName: String, url: String, docType: String = "manual"): String

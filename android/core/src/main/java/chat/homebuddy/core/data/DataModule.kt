@@ -9,9 +9,11 @@ import chat.homebuddy.core.data.conversations.ConversationsRepository
 import chat.homebuddy.core.data.conversations.RetrofitConversationsRemoteDataSource
 import chat.homebuddy.core.data.conversations.RoomConversationsLocalDataSource
 import chat.homebuddy.core.data.documents.CachedDocumentsRepository
+import chat.homebuddy.core.data.documents.ContentResolverPickedFileDataSource
 import chat.homebuddy.core.data.documents.DocumentsLocalDataSource
 import chat.homebuddy.core.data.documents.DocumentsRemoteDataSource
 import chat.homebuddy.core.data.documents.DocumentsRepository
+import chat.homebuddy.core.data.documents.PickedFileDataSource
 import chat.homebuddy.core.data.documents.RetrofitDocumentsRemoteDataSource
 import chat.homebuddy.core.data.documents.RoomDocumentsLocalDataSource
 import chat.homebuddy.core.data.documents.UploadFiles
@@ -63,12 +65,17 @@ object DataModule {
 
     @Provides
     @Singleton
+    fun pickedFileDataSource(@ApplicationContext context: Context): PickedFileDataSource = ContentResolverPickedFileDataSource(context)
+
+    @Provides
+    @Singleton
     fun documentsRepository(
         remote: DocumentsRemoteDataSource,
         local: DocumentsLocalDataSource,
+        picked: PickedFileDataSource,
         files: UploadFiles,
         scheduler: UploadScheduler,
-    ): DocumentsRepository = CachedDocumentsRepository(remote, local, files, scheduler)
+    ): DocumentsRepository = CachedDocumentsRepository(remote, local, picked, files, scheduler)
 
     @Provides
     @Singleton

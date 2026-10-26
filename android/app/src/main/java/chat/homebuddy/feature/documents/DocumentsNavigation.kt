@@ -1,11 +1,9 @@
 package chat.homebuddy.feature.documents
 
-import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.core.net.toUri
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
@@ -19,7 +17,8 @@ import kotlinx.serialization.Serializable
 data class DocumentsDestination(val sharedFile: String? = null, val sharedLink: String? = null)
 
 sealed interface SharedDocument {
-    data class File(val uri: Uri) : SharedDocument
+    /** [uri] is the file's content:// address. */
+    data class File(val uri: String) : SharedDocument
     data class Link(val link: ManualLink.Valid) : SharedDocument
 }
 
@@ -36,7 +35,7 @@ fun NavGraphBuilder.documentsDestination() {
 }
 
 private fun DocumentsDestination.sharedDocument(): SharedDocument? = when {
-    sharedFile != null -> SharedDocument.File(sharedFile.toUri())
+    sharedFile != null -> SharedDocument.File(sharedFile)
     sharedLink != null -> (parseManualLink(sharedLink) as? ManualLink.Valid)?.let(SharedDocument::Link)
     else -> null
 }

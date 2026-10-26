@@ -102,3 +102,13 @@ class TestDocumentsLocalDataSource : DocumentsLocalDataSource {
         uploads.value = emptyMap()
     }
 }
+
+/** Files other apps have handed over, by address. A missing one can't be read. */
+class TestPickedFileDataSource : PickedFileDataSource {
+    val contents = mutableMapOf<String, String>()
+    val names = mutableMapOf<String, String>()
+
+    override suspend fun displayName(uri: String) = names[uri]
+
+    override suspend fun open(uri: String) = contents[uri]?.byteInputStream() ?: throw IOException("No permission to read $uri.")
+}

@@ -1,7 +1,5 @@
 package chat.homebuddy.feature.documents
 
-import android.content.Context
-import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import chat.homebuddy.app.R
@@ -13,10 +11,8 @@ import chat.homebuddy.designsystem.UiText
 import chat.homebuddy.designsystem.asUiText
 import chat.homebuddy.designsystem.uiText
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import javax.inject.Inject
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,7 +26,6 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -38,7 +33,6 @@ import retrofit2.HttpException
 class DocumentsViewModel @Inject constructor(
     observeCurrentHousehold: ObserveCurrentHouseholdUseCase,
     private val repository: DocumentsRepository,
-    @ApplicationContext private val context: Context,
 ) : ViewModel() {
     private val householdId = observeCurrentHousehold()
         .map { it?.id }
@@ -47,6 +41,7 @@ class DocumentsViewModel @Inject constructor(
 
     private val refreshing = MutableStateFlow(false)
     private val message = MutableStateFlow<UiText?>(null)
+    private val picked = MutableStateFlow<PickedFile?>(null)
 
     val state: StateFlow<DocumentsUiState> = householdId
         .flatMapLatest { id ->
@@ -56,6 +51,7 @@ class DocumentsViewModel @Inject constructor(
                 combine(repository.documents(id), repository.uploads(id), refreshing, message, ::documentsUiState)
             }
         }
+        .combine(picked) { state, picked -> state.copy(picked = picked) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DocumentsUiState())
 
     fun refresh() {
@@ -74,19 +70,27 @@ class DocumentsViewModel @Inject constructor(
         }
     }
 
-    fun addFile(uri: Uri, name: String) = launchWithHousehold { id ->
-        try {
-            withContext(Dispatchers.IO) {
-                val input = context.contentResolver.openInputStream(uri) ?: throw IOException("Can't open the file.")
-                repository.addFile(id, name, input)
+    /** A file picked, or shared from another app ([uri] is its content:// address): the screen asks for its name next. */
+    fun onFilePicked(uri: String) {
+        viewModelScope.launch { picked.value = PickedFile(uri, nameFromFileName(repository.fileName(uri))) }
+    }
+
+    fun addPickedFile(name: String) {
+        val file = picked.value ?: return
+        picked.value = null
+        launchWithHousehold { id ->
+            try {
+                repository.addFile(id, name, file.uri)
+            } catch (_: UploadFiles.FileTooLarge) {
+                message.value = uiText(R.string.documents_too_large)
+            } catch (_: IOException) {
+                message.value = uiText(R.string.documents_unreadable)
             }
-        } catch (_: UploadFiles.FileTooLarge) {
-            message.value = uiText(R.string.documents_too_large)
-        } catch (_: IOException) {
-            message.value = uiText(R.string.documents_unreadable)
-        } catch (_: SecurityException) {
-            message.value = uiText(R.string.documents_unreadable)
         }
+    }
+
+    fun dismissPickedFile() {
+        picked.value = null
     }
 
     fun addLink(link: ManualLink.Valid, name: String) = launchWithHousehold { id -> repository.addLink(id, name, link.url) }
@@ -111,16 +115,6 @@ class DocumentsViewModel @Inject constructor(
 
     fun messageShown() {
         message.value = null
-    }
-
-    /** A readable name from the file's name, or null when it has none worth using. */
-    fun displayNameFor(uri: Uri, fallback: String?): String? {
-        val fromProvider = runCatching {
-            context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                if (it.moveToFirst()) it.getString(0) else null
-            }
-        }.getOrNull()
-        return nameFromFileName(fromProvider ?: fallback)
     }
 
     /** Waits for the household when the cached profile hasn't been read yet (right after launch). */
