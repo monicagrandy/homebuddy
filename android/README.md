@@ -66,4 +66,6 @@ Unit, contract, integration (MockWebServer) and screenshot (Roborazzi) tests run
 
 The manual checklist, for what automated tests can't cover (real sign-in, two phones, QR codes, voice), is in `../docs/android-testing.md`. Releasing to Google Play is in `RELEASE.md`.
 
+ViewModels don't depend on Android types, and their tests run on the plain JVM: the real ViewModel and use cases on the test repositories in `:core`'s test fixtures (`TestProfileRepository` and the others). That keeps anything that could hold a Context or a lifecycle out of them. Robolectric is only for code that really uses Android, such as the Room-backed `Cached…Repository` classes and screenshots.
+
 The contract tests read the backend's recorded responses from `../contracts/fixtures`. When the backend changes its API it regenerates those (`python scripts/export_contract.py`), and these tests show whether the app still understands them.

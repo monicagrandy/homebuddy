@@ -2,6 +2,7 @@ package chat.homebuddy.core.auth
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.stringPreferencesKey
+import chat.homebuddy.core.testing.XorCipher
 import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
@@ -11,16 +12,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-
-/** Stand-in for the Keystore cipher, which only exists on a device. */
-class XorCipher(private val broken: Boolean = false) : SecretCipher {
-    override fun encrypt(plain: ByteArray) = plain.map { (it.toInt() xor 0x5A).toByte() }.toByteArray()
-
-    override fun decrypt(data: ByteArray): ByteArray {
-        check(!broken) { "key is gone" }
-        return encrypt(data)
-    }
-}
 
 class AuthStoreTest {
     @get:Rule

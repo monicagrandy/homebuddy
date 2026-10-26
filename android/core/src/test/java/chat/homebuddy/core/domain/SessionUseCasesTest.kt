@@ -2,13 +2,11 @@ package chat.homebuddy.core.domain
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import chat.homebuddy.core.auth.AccessTokenCache
-import chat.homebuddy.core.auth.AuthClient
 import chat.homebuddy.core.auth.AuthRepository
 import chat.homebuddy.core.auth.AuthStore
 import chat.homebuddy.core.auth.SignInPageResult
 import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.auth.TokenSet
-import chat.homebuddy.core.auth.XorCipher
 import chat.homebuddy.core.data.CachedConversationsRepository
 import chat.homebuddy.core.data.CachedDocumentsRepository
 import chat.homebuddy.core.data.CachedProfileRepository
@@ -22,6 +20,8 @@ import chat.homebuddy.core.network.ApiConfig
 import chat.homebuddy.core.network.QueryStreamClient
 import chat.homebuddy.core.network.buildApi
 import chat.homebuddy.core.network.buildHttpClient
+import chat.homebuddy.core.testing.FakeAuthClient
+import chat.homebuddy.core.testing.XorCipher
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Provider
@@ -48,15 +48,6 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-
-private class FakeAuthClient : AuthClient {
-    var exchange: () -> TokenSet = { TokenSet("access-1", "id-1", "refresh-1", expiresAtMillis = null) }
-    var refresh: (String) -> TokenSet? = { TokenSet("access-2", "id-2", refreshToken = null, expiresAtMillis = null) }
-
-    override suspend fun exchange(code: SignInPageResult.Code) = exchange()
-    override suspend fun refresh(refreshToken: String) = refresh.invoke(refreshToken)
-    override fun signOutUrl() = "https://auth.example.com/logout"
-}
 
 /** The real use cases, repositories, DataStore, Room and HTTP client, against a fake Cognito and backend. */
 @RunWith(RobolectricTestRunner::class)

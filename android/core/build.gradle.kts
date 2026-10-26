@@ -30,7 +30,7 @@ android {
             isIncludeAndroidResources = true
         }
     }
-    // ContractFixtures, which reads ../contracts, is shared with :app's tests.
+    // Shared with :app's tests: the test doubles, and ContractFixtures (which reads ../contracts).
     testFixtures {
         enable = true
     }
@@ -56,6 +56,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.work.runtime.ktx)
+
+    testFixturesImplementation(libs.kotlinx.coroutines.android)
+    testFixturesImplementation(libs.androidx.datastore.preferences)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
