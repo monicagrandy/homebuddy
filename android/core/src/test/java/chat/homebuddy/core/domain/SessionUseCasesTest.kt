@@ -9,9 +9,10 @@ import chat.homebuddy.core.auth.SignInPageResult
 import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.auth.TokenSet
 import chat.homebuddy.core.auth.XorCipher
-import chat.homebuddy.core.data.ConversationsRepository
+import chat.homebuddy.core.data.CachedConversationsRepository
+import chat.homebuddy.core.data.CachedDocumentsRepository
+import chat.homebuddy.core.data.CachedProfileRepository
 import chat.homebuddy.core.data.DocumentEntity
-import chat.homebuddy.core.data.DocumentsRepository
 import chat.homebuddy.core.data.FakeScheduler
 import chat.homebuddy.core.data.HomeBuddyDatabase
 import chat.homebuddy.core.data.ProfileRepository
@@ -105,9 +106,9 @@ class SessionUseCasesTest {
         val config = ApiConfig(baseUrl = server.url("/").toString(), clientHeader = "android/test")
         val http = buildHttpClient(config, Provider { session })
         val api = buildApi(config, http)
-        profile = ProfileRepository(api, database.profile())
-        val documents = DocumentsRepository(api, database.documents(), database.uploads(), UploadFiles(folder.newFolder("uploads")), FakeScheduler())
-        val conversations = ConversationsRepository(api, QueryStreamClient(http, config), database.conversations())
+        profile = CachedProfileRepository(api, database.profile())
+        val documents = CachedDocumentsRepository(api, database.documents(), database.uploads(), UploadFiles(folder.newFolder("uploads")), FakeScheduler())
+        val conversations = CachedConversationsRepository(api, QueryStreamClient(http, config), database.conversations())
         val endSession = EndSessionUseCase(auth, profile, documents, conversations)
         signOut = SignOutUseCase(endSession, auth)
         session = NetworkSession(auth, endSession)

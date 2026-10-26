@@ -31,7 +31,7 @@ class ConversationsRepositoryTest {
         server.start()
         database = inMemoryDatabase()
         val streams = QueryStreamClient(OkHttpClient(), ApiConfig(server.url("/").toString(), "android/test"))
-        repository = ConversationsRepository(apiFor(server), streams, database.conversations(), clock = { now })
+        repository = CachedConversationsRepository(apiFor(server), streams, database.conversations(), clock = { now })
     }
 
     @After
@@ -76,7 +76,7 @@ class ConversationsRepositoryTest {
         server.enqueue(conversations("a" to "2026-10-20T10:00:00+00:00", "deleted-on-the-web" to "2026-10-19T10:00:00+00:00"))
         repository.sync(7)
         server.takeRequest()
-        now += ConversationsRepository.FULL_SYNC_EVERY_MILLIS
+        now += CachedConversationsRepository.FULL_SYNC_EVERY_MILLIS
         server.enqueue(conversations("a" to "2026-10-20T10:00:00+00:00"))
 
         repository.sync(7)

@@ -38,7 +38,7 @@ object DataModule {
         database: HomeBuddyDatabase,
         files: UploadFiles,
         scheduler: UploadScheduler,
-    ): DocumentsRepository = DocumentsRepository(api, database.documents(), database.uploads(), files, scheduler)
+    ): DocumentsRepository = CachedDocumentsRepository(api, database.documents(), database.uploads(), files, scheduler)
 
     @Provides
     @Singleton
@@ -48,10 +48,10 @@ object DataModule {
     @Provides
     @Singleton
     fun profileRepository(api: HomeBuddyApi, database: HomeBuddyDatabase): ProfileRepository =
-        ProfileRepository(api, database.profile())
+        CachedProfileRepository(api, database.profile())
 
     @Provides
     @Singleton
     fun conversationsRepository(api: HomeBuddyApi, streams: QueryStreamClient, database: HomeBuddyDatabase): ConversationsRepository =
-        ConversationsRepository(api, streams, database.conversations())
+        CachedConversationsRepository(api, streams, database.conversations())
 }

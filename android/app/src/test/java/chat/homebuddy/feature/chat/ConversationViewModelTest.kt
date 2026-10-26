@@ -4,6 +4,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import chat.homebuddy.app.R
+import chat.homebuddy.core.data.CachedConversationsRepository
+import chat.homebuddy.core.data.CachedProfileRepository
 import chat.homebuddy.core.data.ConversationsRepository
 import chat.homebuddy.core.data.HomeBuddyDatabase
 import chat.homebuddy.core.data.ProfileRepository
@@ -84,9 +86,9 @@ class ConversationViewModelTest {
         val client = buildHttpClient(config, Provider<AccessTokenProvider> { SignedIn })
         val api = buildApi(config, client)
         database = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), HomeBuddyDatabase::class.java).build()
-        profile = ProfileRepository(api, database.profile())
+        profile = CachedProfileRepository(api, database.profile())
         profile.refresh()
-        conversations = ConversationsRepository(api, QueryStreamClient(client, config), database.conversations())
+        conversations = CachedConversationsRepository(api, QueryStreamClient(client, config), database.conversations())
         viewModel = conversation()
         Unit
     }

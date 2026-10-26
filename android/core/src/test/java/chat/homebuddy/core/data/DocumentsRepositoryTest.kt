@@ -36,7 +36,7 @@ class DocumentsRepositoryTest {
         server.start()
         database = inMemoryDatabase()
         uploadsDir = folder.newFolder("uploads")
-        repository = DocumentsRepository(
+        repository = CachedDocumentsRepository(
             apiFor(server),
             database.documents(),
             database.uploads(),

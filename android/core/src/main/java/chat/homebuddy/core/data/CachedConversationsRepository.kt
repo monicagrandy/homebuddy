@@ -1,0 +1,89 @@
+package chat.homebuddy.core.data
+
+import chat.homebuddy.core.network.ConversationDto
+import chat.homebuddy.core.network.HomeBuddyApi
+import chat.homebuddy.core.network.MessageDto
+import chat.homebuddy.core.network.QueryRequestDto
+import chat.homebuddy.core.network.QueryStreamClient
+import chat.homebuddy.core.network.StreamEvent
+import kotlinx.coroutines.flow.Flow
+import retrofit2.HttpException
+
+/**
+ * [ConversationsRepository] as a Room cache. The list syncs incrementally (updated_since) and in
+ * full at most once a day, which is also how threads deleted on another device disappear here.
+ */
+class CachedConversationsRepository(
+    private val api: HomeBuddyApi,
+    private val streams: QueryStreamClient,
+    private val dao: ConversationDao,
+    private val clock: () -> Long = System::currentTimeMillis,
+) : ConversationsRepository {
+    override fun conversations(householdId: Int): Flow<List<ConversationEntity>> = dao.observe(householdId)
+
+    override fun conversation(id: String): Flow<ConversationEntity?> = dao.observeOne(id)
+
+    override fun messages(conversationId: String): Flow<List<MessageEntity>> = dao.observeMessages(conversationId)
+
+    override suspend fun sync(householdId: Int, forceFull: Boolean) {
+        val state = dao.syncState(householdId)
+        val full = forceFull || state == null || clock() - state.lastFullSyncAt >= FULL_SYNC_EVERY_MILLIS
+        val fetched = api.conversations(householdId, updatedSince = if (full) null else state?.newestUpdatedAt)
+        val entities = fetched.map { it.toEntity() }
+        if (full) dao.replaceAll(householdId, entities) else dao.upsert(entities)
+        val newest = (entities.map { it.updatedAt } + listOfNotNull(state?.newestUpdatedAt.takeUnless { full })).maxOrNull()
+        dao.saveSyncState(
+            ConversationSyncEntity(
+                householdId = householdId,
+                lastFullSyncAt = if (full) clock() else state!!.lastFullSyncAt,
+                newestUpdatedAt = newest,
+            ),
+        )
+    }
+
+    override suspend fun loadMessages(householdId: Int, conversationId: String): Boolean {
+        val messages = try {
+            api.conversationMessages(conversationId, householdId)
+        } catch (error: HttpException) {
+            if (error.code() == 404) {
+                dao.delete(conversationId)
+                return false
+            }
+            throw error
+        }
+        dao.replaceMessages(conversationId, messages.mapIndexed { index, message -> message.toEntity(conversationId, index) })
+        return true
+    }
+
+    override suspend fun delete(householdId: Int, conversationId: String) {
+        val response = api.deleteConversation(conversationId, householdId)
+        if (!response.isSuccessful && response.code() != 404) throw HttpException(response)
+        dao.delete(conversationId)
+    }
+
+    // The request starts when the caller collects the flow and runs on OkHttp's threads, so
+    // collecting on the main thread never blocks it.
+    override fun ask(householdId: Int, conversationId: String, question: String, zipCode: String?): Flow<StreamEvent> =
+        streams.stream(QueryRequestDto(question = question, sessionId = conversationId, householdId = householdId, householdZipCode = zipCode))
+
+    override suspend fun afterAnswer(householdId: Int, conversationId: String) {
+        runCatching {
+            sync(householdId)
+            loadMessages(householdId, conversationId)
+        }
+    }
+
+    override suspend fun wipe() {
+        dao.clear()
+    }
+
+    companion object {
+        const val FULL_SYNC_EVERY_MILLIS = 24 * 60 * 60 * 1000L
+    }
+}
+
+internal fun ConversationDto.toEntity() =
+    ConversationEntity(id = id, householdId = householdId, title = title, createdAt = createdAt, updatedAt = updatedAt)
+
+internal fun MessageDto.toEntity(conversationId: String, position: Int) =
+    MessageEntity(conversationId = conversationId, position = position, role = role, content = content, createdAt = createdAt)
