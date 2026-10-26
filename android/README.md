@@ -41,7 +41,7 @@ In the data layer, a repository never touches a DAO or the API itself. Each feat
 
 Every data source is an interface with one implementation. Remote data sources handle HTTP status codes: a 404 on delete counts as done, and a missing thread or job comes back as `null`. Repositories never see Retrofit's `Response`. Room's entities, DAOs and database stay in `core.data`, so the exported schema files don't move.
 
-Each feature declares its typed Navigation Compose destinations next to its screens (`SignInNavigation.kt`, `ChatNavigation.kt`, `DocumentsNavigation.kt` and so on). There are two `NavHost`s:
+Each feature declares its typed Navigation Compose destinations next to its screens (`SignInNavigation.kt`, `ChatNavigation.kt`, `DocumentsNavigation.kt` and so on). The nav graph decodes a destination's arguments with `toRoute()` and hands them to its ViewModel through a Hilt assisted factory. ViewModels don't call `SavedStateHandle.toRoute()`, which needs Android's `Bundle`, so they stay testable on the plain JVM. There are two `NavHost`s:
 
 - The root one, in `MainActivity`, holds sign-in, home setup and the signed-in app. The session decides which one you're on. Each change navigates there and clears the back stack (`navigateForSession` in `AppNavigation.kt`), so back from the app never returns to sign-in, and back from sign-in never goes into the app.
 - `MainScaffold`, the signed-in app, has its own `NavHost` for the tabs and the conversation screen, with a bottom bar.
@@ -82,9 +82,9 @@ Unit tests stay light: everything below runs on the plain JVM except where it sa
 | Remote data sources | `Retrofit…RemoteDataSourceTest`: requests and status handling | JVM | MockWebServer |
 | Repositories, upload processor | `Cached…RepositoryTest`, `UploadProcessorTest` | JVM | `Test…DataSources.kt` in each feature's test package |
 | Use cases, auth | `SessionUseCasesTest`, `NetworkSessionTest`, `AuthRepositoryTest`, `AuthStoreTest` | JVM | the test repositories in `:core`'s test fixtures (`TestProfileRepository` and the others) |
-| ViewModels | `SessionViewModelTest` | JVM | the same test repositories |
+| ViewModels | `SessionViewModelTest`, `HomeSetupViewModelTest`, `DocumentsViewModelTest`, `ConversationListViewModelTest`, `ConversationViewModelTest`, `AccountViewModelTest` | JVM | the same test repositories, and the backend's recorded answer streams (`ContractFixtures.streamEvents`) |
 | Screens, navigation | screenshot tests, `AppNavigationTest`, `MainNavigationTest`, `SignedInScopeTest` | Robolectric | none |
 
-The test doubles fake only what some test has needed so far. Anything else fails loudly with `notFaked()`, so add it to the double when a test needs it. `ConversationViewModelTest` still runs on Robolectric against real Room until it moves to the test repositories.
+The test doubles are plain in-memory classes. Each has a `failure` to make its server calls throw, and hooks to hold a call in flight, so tests can check what happens while one is running.
 
 The contract tests read the backend's recorded responses from `../contracts/fixtures`. When the backend changes its API it regenerates those (`python scripts/export_contract.py`), and these tests show whether the app still understands them.
