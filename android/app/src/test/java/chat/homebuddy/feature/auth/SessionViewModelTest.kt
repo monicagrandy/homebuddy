@@ -110,12 +110,13 @@ class SessionViewModelTest {
         val activity = ViewModelStore()
         val viewModel = ViewModelProvider.create(activity, viewModelFactory { initializer { launch() } })[SessionViewModel::class]
         viewModel.onSignInResult(CODE)
-        assertEquals(AppUiState.Main, viewModel.state.value)
+        assertTrue("signed in", viewModel.state.value is AppUiState.Main)
 
         // Back from the signed-in app closes it (see SignedInScopeTest), which clears its ViewModels.
         activity.clear()
 
-        assertEquals(AppUiState.Main, launch().state.value)
+        assertTrue("the session is still stored", auth.isSignedIn())
+        assertTrue("reopening goes straight into the app", launch().state.value is AppUiState.Main)
     }
 
     @Test
