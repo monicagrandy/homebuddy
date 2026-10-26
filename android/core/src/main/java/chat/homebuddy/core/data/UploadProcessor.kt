@@ -128,7 +128,12 @@ class UploadProcessor(
     }
 
     private suspend fun refreshDocuments(householdId: Int) {
-        runCatching { documents.replaceAll(householdId, api.documents(householdId).map { it.toEntity(householdId) }) }
+        // The upload is done either way; the documents list refreshes again when it's next opened.
+        try {
+            documents.replaceAll(householdId, api.documents(householdId).map { it.toEntity(householdId) })
+        } catch (_: IOException) {
+        } catch (_: HttpException) {
+        }
     }
 
     private companion object {

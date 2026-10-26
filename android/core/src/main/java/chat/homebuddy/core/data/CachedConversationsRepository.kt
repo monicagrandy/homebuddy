@@ -6,6 +6,7 @@ import chat.homebuddy.core.network.MessageDto
 import chat.homebuddy.core.network.QueryRequestDto
 import chat.homebuddy.core.network.QueryStreamClient
 import chat.homebuddy.core.network.StreamEvent
+import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import retrofit2.HttpException
 
@@ -67,9 +68,12 @@ class CachedConversationsRepository(
         streams.stream(QueryRequestDto(question = question, sessionId = conversationId, householdId = householdId, householdZipCode = zipCode))
 
     override suspend fun afterAnswer(householdId: Int, conversationId: String) {
-        runCatching {
+        // The server has saved the answer, so a refresh that fails here is caught up by the next sync.
+        try {
             sync(householdId)
             loadMessages(householdId, conversationId)
+        } catch (_: IOException) {
+        } catch (_: HttpException) {
         }
     }
 
