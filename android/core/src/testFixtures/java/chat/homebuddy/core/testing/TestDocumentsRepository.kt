@@ -6,7 +6,7 @@ import chat.homebuddy.core.data.documents.DocumentsRepository
 import java.io.InputStream
 import kotlinx.coroutines.flow.Flow
 
-/** [DocumentsRepository] in memory, for ViewModel tests on the JVM. So far only signing out needs it. */
+/** [DocumentsRepository] in memory, for ViewModel and use case tests on the JVM. So far only signing out needs it. */
 class TestDocumentsRepository : DocumentsRepository {
     override fun documents(householdId: Int): Flow<List<DocumentEntity>> = notFaked()
 
@@ -24,6 +24,11 @@ class TestDocumentsRepository : DocumentsRepository {
 
     override suspend fun dismiss(uploadId: String) = notFaked()
 
-    /** Nothing is cached yet, so there's nothing to wipe. */
-    override suspend fun wipe() = Unit
+    var wiped = false
+        private set
+
+    /** Nothing else is faked yet, so wiping only records that it happened. */
+    override suspend fun wipe() {
+        wiped = true
+    }
 }

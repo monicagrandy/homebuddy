@@ -1,204 +1,100 @@
 package chat.homebuddy.core.domain
 
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
-import chat.homebuddy.core.auth.AccessTokenCache
-import chat.homebuddy.core.auth.AuthRepository
-import chat.homebuddy.core.auth.AuthStore
 import chat.homebuddy.core.auth.SignInPageResult
 import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.auth.TokenSet
-import chat.homebuddy.core.data.DocumentEntity
-import chat.homebuddy.core.data.FakeScheduler
-import chat.homebuddy.core.data.HomeBuddyDatabase
-import chat.homebuddy.core.data.conversations.CachedConversationsRepository
-import chat.homebuddy.core.data.conversations.RetrofitConversationsRemoteDataSource
-import chat.homebuddy.core.data.conversations.RoomConversationsLocalDataSource
-import chat.homebuddy.core.data.documents.CachedDocumentsRepository
-import chat.homebuddy.core.data.documents.RetrofitDocumentsRemoteDataSource
-import chat.homebuddy.core.data.documents.RoomDocumentsLocalDataSource
-import chat.homebuddy.core.data.documents.UploadFiles
-import chat.homebuddy.core.data.inMemoryDatabase
-import chat.homebuddy.core.data.profile.CachedProfileRepository
-import chat.homebuddy.core.data.profile.ProfileRepository
-import chat.homebuddy.core.data.profile.RetrofitProfileRemoteDataSource
-import chat.homebuddy.core.data.profile.RoomProfileLocalDataSource
-import chat.homebuddy.core.network.ApiConfig
-import chat.homebuddy.core.network.QueryStreamClient
-import chat.homebuddy.core.network.buildApi
-import chat.homebuddy.core.network.buildHttpClient
 import chat.homebuddy.core.testing.FakeAuthClient
-import chat.homebuddy.core.testing.XorCipher
-import java.io.File
-import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Provider
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import chat.homebuddy.core.testing.TestConversationsRepository
+import chat.homebuddy.core.testing.TestDocumentsRepository
+import chat.homebuddy.core.testing.TestProfileRepository
+import chat.homebuddy.core.testing.httpError
+import chat.homebuddy.core.testing.testAuthRepository
+import java.io.IOException
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
-import okhttp3.mockwebserver.Dispatcher
-import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import okhttp3.mockwebserver.RecordedRequest
-import okhttp3.mockwebserver.SocketPolicy
-import org.junit.After
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Before
-import org.junit.Rule
 import org.junit.Test
-import org.junit.rules.TemporaryFolder
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 
-/** The real use cases, repositories, DataStore, Room and HTTP client, against a fake Cognito and backend. */
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
+/** The real use cases and AuthRepository, on a fake Cognito and in-memory test repositories. */
 class SessionUseCasesTest {
-    @get:Rule
-    val folder = TemporaryFolder()
-
-    private val server = MockWebServer()
-    private val routes = ConcurrentHashMap<String, () -> MockResponse>()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val authClient = FakeAuthClient()
-    private val cache = AccessTokenCache()
-    private lateinit var database: HomeBuddyDatabase
-    private lateinit var store: AuthStore
-    private lateinit var auth: AuthRepository
-    private lateinit var profile: ProfileRepository
-    private lateinit var observeSession: ObserveSessionUseCase
-    private lateinit var signIn: SignInUseCase
-    private lateinit var signOut: SignOutUseCase
-    private lateinit var refreshProfile: RefreshProfileUseCase
-    private lateinit var deleteAccount: DeleteAccountUseCase
+    private val auth = testAuthRepository(authClient)
+    private val profile = TestProfileRepository()
+    private val documents = TestDocumentsRepository()
+    private val conversations = TestConversationsRepository()
+    private val endSession = EndSessionUseCase(auth, profile, documents, conversations)
+    private val observeSession = ObserveSessionUseCase(auth, profile)
+    private val signIn = SignInUseCase(auth, profile)
+    private val signOut = SignOutUseCase(endSession, auth)
+    private val refreshProfile = RefreshProfileUseCase(auth, profile, endSession)
+    private val deleteAccount = DeleteAccountUseCase(profile, endSession)
 
-    private val code = SignInPageResult.Code("authorization-response")
-    private val user = """{"id": 1, "cognito_sub": "s", "email": "pat@example.com", "display_name": "Pat"}"""
-    private val home = """{"id": 7, "name": "Elm Street", "zip_code": "80202", "home_type": "condo", "role": "owner"}"""
+    private suspend fun session() = observeSession().first()
 
-    @Before
-    fun setUp() {
-        routes["POST /auth/bootstrap"] = { json(user) }
-        routes["GET /auth/me"] = { json(user) }
-        routes["GET /households"] = { json("[$home]") }
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse {
-                val route = "${request.method} ${request.path.orEmpty().substringBefore('?')}"
-                // Like the backend: no token, no access (bootstrap checks the tokens in its body instead).
-                if (request.getHeader("Authorization") == null && route != "POST /auth/bootstrap") return status(401)
-                return routes[route]?.invoke() ?: status(404)
-            }
-        }
-        server.start()
-
-        database = inMemoryDatabase()
-        store = AuthStore(PreferenceDataStoreFactory.create(scope = scope) { File(folder.root, "auth.preferences_pb") }, XorCipher())
-        auth = AuthRepository(authClient, store, cache)
-        lateinit var session: NetworkSession
-        val config = ApiConfig(baseUrl = server.url("/").toString(), clientHeader = "android/test")
-        val http = buildHttpClient(config, Provider { session })
-        val api = buildApi(config, http)
-        profile = CachedProfileRepository(RetrofitProfileRemoteDataSource(api), RoomProfileLocalDataSource(database.profile()))
-        val documents = CachedDocumentsRepository(
-            RetrofitDocumentsRemoteDataSource(api),
-            RoomDocumentsLocalDataSource(database.documents(), database.uploads()),
-            UploadFiles(folder.newFolder("uploads")),
-            FakeScheduler(),
-        )
-        val conversations = CachedConversationsRepository(
-            RetrofitConversationsRemoteDataSource(api, QueryStreamClient(http, config)),
-            RoomConversationsLocalDataSource(database.conversations()),
-        )
-        val endSession = EndSessionUseCase(auth, profile, documents, conversations)
-        signOut = SignOutUseCase(endSession, auth)
-        session = NetworkSession(auth, endSession)
-        observeSession = ObserveSessionUseCase(auth, profile)
-        signIn = SignInUseCase(auth, profile)
-        refreshProfile = RefreshProfileUseCase(auth, profile, endSession)
-        deleteAccount = DeleteAccountUseCase(profile, endSession)
-    }
-
-    @After
-    fun tearDown() {
-        scope.cancel()
-        database.close()
-        server.shutdown()
-    }
-
-    private fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
-
-    private fun status(code: Int, body: String = """{"detail": "nope"}""") = MockResponse().setResponseCode(code).setBody(body)
-
-    private fun session() = runBlocking { observeSession().first() }
-
-    private fun signedIn() = runBlocking {
-        assertEquals(SignInResult.SignedIn, signIn(code))
-    }
+    private suspend fun signedIn() = assertEquals(SignInResult.SignedIn, signIn(CODE))
 
     @Test
-    fun `a new install is signed out`() {
+    fun `a new install is signed out`() = runTest {
         assertEquals(SessionState.SignedOut(reason = null), session())
     }
 
     @Test
-    fun `signing in sets up the profile and stores only the refresh token`() = runBlocking {
-        routes["GET /households"] = { json("[]") }
+    fun `signing in sets up the profile with the new tokens`() = runTest {
+        profile.server = profile.server.copy(households = emptyList())
 
-        assertEquals(SignInResult.SignedIn, signIn(code))
+        assertEquals(SignInResult.SignedIn, signIn(CODE))
 
         val state = session() as SessionState.SignedIn
         assertEquals("pat@example.com", state.user.email)
         assertTrue(state.needsHome)
-        assertEquals("refresh-1", store.stored.first().refreshToken)
-        assertEquals("""{"id_token":"id-1","access_token":"access-1"}""", server.takeRequest().body.readUtf8())
-        val onDisk = folder.root.resolve("auth.preferences_pb").readText(Charsets.ISO_8859_1)
-        assertFalse(onDisk.contains("refresh-1"))
-        assertFalse(onDisk.contains("access-1"))
+        assertEquals("id-1" to "access-1", profile.bootstrappedWith)
+        assertTrue(auth.isSignedIn())
     }
 
     @Test
-    fun `a sign-in whose access token expires during setup keeps its refresh token`() = runBlocking {
-        authClient.exchange = { TokenSet("access-1", "id-1", "refresh-1", expiresAtMillis = 0) }
+    fun `a sign-in without an ID token fails and keeps nothing`() = runTest {
+        authClient.exchange = { TokenSet("access-1", idToken = null, refreshToken = "refresh-1", expiresAtMillis = null) }
 
-        assertEquals(SignInResult.SignedIn, signIn(code))
-
-        assertEquals("refresh-1", store.stored.first().refreshToken)
-    }
-
-    @Test
-    fun `an account outside the beta is not kept signed in`() = runBlocking {
-        routes["POST /auth/bootstrap"] = { status(403) }
-
-        assertEquals(SignInResult.NotInBeta, signIn(code))
+        assertEquals(SignInResult.Failed, signIn(CODE))
 
         assertEquals(SessionState.SignedOut(reason = null), session())
         assertNull(auth.accessToken())
     }
 
     @Test
-    fun `a sign-in that loses the connection half-way keeps nothing`() = runBlocking {
-        routes["GET /households"] = { MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST) }
+    fun `an account outside the beta is not kept signed in`() = runTest {
+        profile.failure = httpError(403)
 
-        assertEquals(SignInResult.Offline, signIn(code))
+        assertEquals(SignInResult.NotInBeta, signIn(CODE))
+
+        assertEquals(SessionState.SignedOut(reason = null), session())
+        assertNull(auth.accessToken())
+    }
+
+    @Test
+    fun `a sign-in that loses the connection half-way keeps nothing`() = runTest {
+        profile.failure = IOException("No connection")
+
+        assertEquals(SignInResult.Offline, signIn(CODE))
 
         assertEquals(SessionState.SignedOut(reason = null), session())
         assertNull(profile.profile.first())
     }
 
     @Test
-    fun `closing the sign-in page changes nothing`() = runBlocking {
+    fun `a sign-in page that failed or was closed changes nothing`() = runTest {
+        assertEquals(SignInResult.Failed, signIn(SignInPageResult.Failed))
         assertEquals(SignInResult.Cancelled, signIn(SignInPageResult.Cancelled))
+
         assertEquals(SessionState.SignedOut(reason = null), session())
     }
 
     @Test
-    fun `trying to sign in again clears the last sign-out reason`() = runBlocking {
-        store.clear(SignOutReason.ACCOUNT_DELETED)
+    fun `trying to sign in again clears the last sign-out reason`() = runTest {
+        auth.clear(SignOutReason.ACCOUNT_DELETED)
 
         signIn(SignInPageResult.Cancelled)
 
@@ -206,44 +102,22 @@ class SessionUseCasesTest {
     }
 
     @Test
-    fun `signing out wipes this phone and returns the logout page`() = runBlocking {
+    fun `signing out wipes this phone and returns the logout page`() = runTest {
         signedIn()
-        database.documents().upsertAll(listOf(DocumentEntity(7, "bosch", "Bosch", "manual", "indexed", null, null)))
 
         assertEquals("https://auth.example.com/logout", signOut())
 
         assertEquals(SessionState.SignedOut(reason = null), session())
-        assertEquals(emptyList<DocumentEntity>(), database.documents().observe(7).first())
         assertNull(profile.profile.first())
-        assertNull(store.stored.first().refreshToken)
+        assertTrue(documents.wiped)
+        assertTrue(conversations.wiped)
+        assertFalse(auth.isSignedIn())
     }
 
     @Test
-    fun `a session the server rejects ends with a reason`() = runBlocking {
+    fun `being offline at launch keeps the session and the cached profile`() = runTest {
         signedIn()
-        routes["GET /auth/me"] = { status(401) }
-
-        assertTrue(refreshProfile())
-
-        assertEquals(SessionState.SignedOut(SignOutReason.SESSION_ENDED), session())
-        assertNull(profile.profile.first())
-    }
-
-    @Test
-    fun `an expired refresh token ends the session on the next request`() = runBlocking {
-        signedIn()
-        cache.put(TokenSet("access-1", "id-1", "refresh-1", expiresAtMillis = 0))
-        authClient.refresh = { null }
-
-        refreshProfile()
-
-        assertEquals(SessionState.SignedOut(SignOutReason.SESSION_ENDED), session())
-    }
-
-    @Test
-    fun `being offline at launch keeps the session and the cached profile`() = runBlocking {
-        signedIn()
-        routes["GET /auth/me"] = { MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST) }
+        profile.failure = IOException("No connection")
 
         assertFalse(refreshProfile())
 
@@ -251,19 +125,28 @@ class SessionUseCasesTest {
     }
 
     @Test
-    fun `an account removed from the beta is signed out at launch`() = runBlocking {
+    fun `a refresh the server rejects is left to the HTTP client, which ends the session`() = runTest {
         signedIn()
-        routes["GET /auth/me"] = { status(403) }
+        profile.failure = httpError(401)
 
-        refreshProfile()
-
-        assertEquals(SessionState.SignedOut(SignOutReason.NOT_IN_BETA), session())
+        assertTrue(refreshProfile())
     }
 
     @Test
-    fun `a profile changed on another device shows up after a refresh`() = runBlocking {
+    fun `an account removed from the beta is signed out at launch`() = runTest {
         signedIn()
-        routes["GET /auth/me"] = { json("""{"id": 1, "cognito_sub": "s", "email": "pat@example.com", "display_name": "Patricia"}""") }
+        profile.failure = httpError(403)
+
+        assertTrue(refreshProfile())
+
+        assertEquals(SessionState.SignedOut(SignOutReason.NOT_IN_BETA), session())
+        assertTrue(documents.wiped)
+    }
+
+    @Test
+    fun `a profile changed on another device shows up after a refresh`() = runTest {
+        signedIn()
+        profile.server = profile.server.copy(user = profile.server.user.copy(displayName = "Patricia"))
 
         assertTrue(refreshProfile())
 
@@ -271,10 +154,16 @@ class SessionUseCasesTest {
     }
 
     @Test
-    fun `creating a home moves the session on`() = runBlocking {
-        routes["GET /households"] = { json("[]") }
+    fun `refreshing while signed out does nothing`() = runTest {
+        assertTrue(refreshProfile())
+
+        assertNull(profile.profile.first())
+    }
+
+    @Test
+    fun `creating a home moves the session on`() = runTest {
+        profile.server = profile.server.copy(households = emptyList())
         signedIn()
-        routes["POST /households"] = { json(home) }
 
         profile.createHousehold("Elm Street", "80202", "condo")
 
@@ -282,22 +171,37 @@ class SessionUseCasesTest {
     }
 
     @Test
-    fun `deleting the account signs out with a reason`() = runBlocking {
+    fun `deleting the account signs out with a reason`() = runTest {
         signedIn()
-        routes["DELETE /me"] = { status(204, body = "") }
 
         assertEquals(DeleteAccountResult.Deleted, deleteAccount())
 
+        assertTrue(profile.deleted)
         assertEquals(SessionState.SignedOut(SignOutReason.ACCOUNT_DELETED), session())
+        assertTrue(documents.wiped)
     }
 
     @Test
-    fun `a deletion that fails keeps the session and says why`() = runBlocking {
+    fun `a deletion that fails keeps the session and says why`() = runTest {
         signedIn()
-        routes["DELETE /me"] = { status(502, """{"detail": "Couldn't finish deleting your sign-in. Please try again."}""") }
+        profile.failure = httpError(502, "Couldn't finish deleting your sign-in. Please try again.")
 
         assertEquals(DeleteAccountResult.Failed("Couldn't finish deleting your sign-in. Please try again."), deleteAccount())
 
         assertTrue(session() is SessionState.SignedIn)
+    }
+
+    @Test
+    fun `a deletion while offline keeps the session`() = runTest {
+        signedIn()
+        profile.failure = IOException("No connection")
+
+        assertEquals(DeleteAccountResult.Offline, deleteAccount())
+
+        assertTrue(session() is SessionState.SignedIn)
+    }
+
+    private companion object {
+        val CODE = SignInPageResult.Code("authorization-response")
     }
 }

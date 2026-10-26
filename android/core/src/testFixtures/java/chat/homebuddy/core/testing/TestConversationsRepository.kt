@@ -6,7 +6,7 @@ import chat.homebuddy.core.data.conversations.ConversationsRepository
 import chat.homebuddy.core.network.StreamEvent
 import kotlinx.coroutines.flow.Flow
 
-/** [ConversationsRepository] in memory, for ViewModel tests on the JVM. So far only signing out needs it. */
+/** [ConversationsRepository] in memory, for ViewModel and use case tests on the JVM. So far only signing out needs it. */
 class TestConversationsRepository : ConversationsRepository {
     override fun conversations(householdId: Int): Flow<List<ConversationEntity>> = notFaked()
 
@@ -24,6 +24,11 @@ class TestConversationsRepository : ConversationsRepository {
 
     override suspend fun afterAnswer(householdId: Int, conversationId: String) = notFaked()
 
-    /** Nothing is cached yet, so there's nothing to wipe. */
-    override suspend fun wipe() = Unit
+    var wiped = false
+        private set
+
+    /** Nothing else is faked yet, so wiping only records that it happened. */
+    override suspend fun wipe() {
+        wiped = true
+    }
 }
