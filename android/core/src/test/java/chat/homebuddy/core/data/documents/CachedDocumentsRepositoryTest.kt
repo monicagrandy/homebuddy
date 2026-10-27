@@ -8,6 +8,10 @@ import chat.homebuddy.core.testing.httpError
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -154,6 +158,22 @@ class CachedDocumentsRepositoryTest {
         assertTrue(repository.uploads(7).first().isEmpty())
         assertFalse(uploadsDir.exists())
         assertTrue(scheduler.cancelledAll)
+    }
+
+    @Test
+    fun `wiping deletes the copies on the IO dispatcher, not on the caller's thread`() = runTest {
+        val onIo = CachedDocumentsRepository(
+            remote, local, picked, UploadFiles(uploadsDir), scheduler,
+            io = StandardTestDispatcher(testScheduler), clock = { 42L }, newId = { "upload-1" },
+        )
+        onIo.addFile(7, "Bosch manual", MANUAL)
+
+        // The caller runs wipe at once, as the main thread would, up to where it hands the files to IO.
+        launch(UnconfinedTestDispatcher(testScheduler)) { onIo.wipe() }
+        assertTrue("the copies are still there until IO runs", uploadsDir.exists())
+
+        runCurrent()
+        assertFalse(uploadsDir.exists())
     }
 
     private companion object {

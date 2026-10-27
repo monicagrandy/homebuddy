@@ -90,7 +90,7 @@ class CachedDocumentsRepository(
     override suspend fun wipe() {
         scheduler.cancelAll()
         local.clear()
-        files.clear()
+        withContext(io) { files.clear() }
     }
 }
 
