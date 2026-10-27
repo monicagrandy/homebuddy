@@ -10,6 +10,7 @@ import java.io.IOException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -44,6 +45,12 @@ class CachedDocumentsRepositoryTest {
 
     private suspend fun cache(vararg entryIds: String) =
         local.replaceDocuments(7, entryIds.map { DocumentEntity(7, it, it, "manual", "ready", null, null) })
+
+    /** The repository with IO run only when the test lets it, so a test can see what's still waiting for IO. */
+    private fun TestScope.repositoryWithTestIo() = CachedDocumentsRepository(
+        remote, local, picked, UploadFiles(uploadsDir), scheduler,
+        io = StandardTestDispatcher(testScheduler), clock = { 42L }, newId = { "upload-1" },
+    )
 
     @Test
     fun `a refresh replaces the cache, so documents deleted elsewhere disappear`() = runTest {
@@ -161,15 +168,26 @@ class CachedDocumentsRepositoryTest {
     }
 
     @Test
+    fun `dismissing deletes the copy on the IO dispatcher, not on the caller's thread`() = runTest {
+        val repository = repositoryWithTestIo()
+        repository.addFile(7, "Bosch manual", MANUAL)
+        val copy = File(local.upload("upload-1")!!.filePath!!)
+
+        // The caller runs dismiss at once, as the main thread would, up to where it hands the file to IO.
+        launch(UnconfinedTestDispatcher(testScheduler)) { repository.dismiss("upload-1") }
+        assertTrue("the copy is still there until IO runs", copy.exists())
+
+        runCurrent()
+        assertFalse(copy.exists())
+    }
+
+    @Test
     fun `wiping deletes the copies on the IO dispatcher, not on the caller's thread`() = runTest {
-        val onIo = CachedDocumentsRepository(
-            remote, local, picked, UploadFiles(uploadsDir), scheduler,
-            io = StandardTestDispatcher(testScheduler), clock = { 42L }, newId = { "upload-1" },
-        )
-        onIo.addFile(7, "Bosch manual", MANUAL)
+        val repository = repositoryWithTestIo()
+        repository.addFile(7, "Bosch manual", MANUAL)
 
         // The caller runs wipe at once, as the main thread would, up to where it hands the files to IO.
-        launch(UnconfinedTestDispatcher(testScheduler)) { onIo.wipe() }
+        launch(UnconfinedTestDispatcher(testScheduler)) { repository.wipe() }
         assertTrue("the copies are still there until IO runs", uploadsDir.exists())
 
         runCurrent()

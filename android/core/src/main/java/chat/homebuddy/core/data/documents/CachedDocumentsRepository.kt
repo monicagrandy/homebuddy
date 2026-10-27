@@ -83,7 +83,7 @@ class CachedDocumentsRepository(
     override suspend fun dismiss(uploadId: String) {
         val upload = local.upload(uploadId) ?: return
         scheduler.cancel(uploadId)
-        files.delete(upload.filePath)
+        withContext(io) { files.delete(upload.filePath) }
         local.deleteUpload(uploadId)
     }
 
