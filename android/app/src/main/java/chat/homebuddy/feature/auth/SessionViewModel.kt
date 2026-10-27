@@ -15,6 +15,7 @@ import chat.homebuddy.designsystem.UiText
 import chat.homebuddy.designsystem.uiText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -57,6 +58,7 @@ class SessionViewModel @Inject constructor(
     private val signingIn = MutableStateFlow(false)
     private val signInError = MutableStateFlow<UiText?>(null)
     private val profileError = MutableStateFlow<UiText?>(null)
+    private var signOutJob: Job? = null
 
     val state: StateFlow<AppUiState> = combine(session, signingIn, signInError, profileError) { session, signingIn, signInError, profileError ->
         when (session) {
@@ -111,7 +113,8 @@ class SessionViewModel @Inject constructor(
     }
 
     fun onSignOutClick() {
-        viewModelScope.launch { _pendingLogoutUrl.value = signOut() }
+        if (signOutJob?.isActive == true) return
+        signOutJob = viewModelScope.launch { _pendingLogoutUrl.value = signOut() }
     }
 
     fun onLogoutPageOpened() {

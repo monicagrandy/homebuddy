@@ -10,7 +10,11 @@ import chat.homebuddy.core.testing.TestProfileRepository
 import chat.homebuddy.core.testing.httpError
 import chat.homebuddy.core.testing.testAuthRepository
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -112,6 +116,35 @@ class SessionUseCasesTest {
         assertTrue(documents.wiped)
         assertTrue(conversations.wiped)
         assertFalse(auth.isSignedIn())
+    }
+
+    @Test
+    fun `ending a session that has already ended does nothing`() = runTest {
+        signedIn()
+        endSession(SignOutReason.SESSION_ENDED)
+
+        endSession(SignOutReason.ACCOUNT_DELETED)
+
+        assertEquals(SessionState.SignedOut(SignOutReason.SESSION_ENDED), session())
+        assertEquals(1, conversations.wipes)
+    }
+
+    @Test
+    fun `a call that arrives while the session is ending waits for it, then does nothing`() = runTest {
+        signedIn()
+        val wiping = CompletableDeferred<Unit>()
+        conversations.whileWiping = { wiping.await() }
+        val first = launch { endSession(SignOutReason.SESSION_ENDED) }
+        val second = launch { endSession(SignOutReason.ACCOUNT_DELETED) }
+        runCurrent()
+        // Noted before the first call is let go, or a failure here would leave it held forever.
+        val secondWaited = !second.isCompleted
+        wiping.complete(Unit)
+        joinAll(first, second)
+
+        assertTrue("the second call waited for the first", secondWaited)
+        assertEquals(SessionState.SignedOut(SignOutReason.SESSION_ENDED), session())
+        assertEquals(1, conversations.wipes)
     }
 
     @Test

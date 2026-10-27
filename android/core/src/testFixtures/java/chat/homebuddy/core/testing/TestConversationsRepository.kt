@@ -29,8 +29,12 @@ class TestConversationsRepository : ConversationsRepository {
 
     /** The threads refreshed after an answer, in order. */
     val refreshedAfterAnswer = mutableListOf<String>()
-    var wiped = false
+
+    /** Runs at the start of each [wipe], so a test can hold one in flight. */
+    var whileWiping: suspend () -> Unit = {}
+    var wipes = 0
         private set
+    val wiped get() = wipes > 0
 
     data class Question(val householdId: Int, val conversationId: String, val question: String, val zipCode: String?)
 
@@ -77,7 +81,8 @@ class TestConversationsRepository : ConversationsRepository {
     }
 
     override suspend fun wipe() {
-        wiped = true
+        wipes++
+        whileWiping()
         cached.value = emptyList()
         cachedMessages.value = emptyMap()
     }

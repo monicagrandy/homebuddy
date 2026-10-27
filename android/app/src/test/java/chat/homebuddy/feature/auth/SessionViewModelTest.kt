@@ -43,7 +43,8 @@ class SessionViewModelTest {
     private val auth = testAuthRepository(authClient)
     private val profile = TestProfileRepository()
     private val signIn = SignInUseCase(auth, profile)
-    private val endSession = EndSessionUseCase(auth, profile, TestDocumentsRepository(), TestConversationsRepository())
+    private val conversations = TestConversationsRepository()
+    private val endSession = EndSessionUseCase(auth, profile, TestDocumentsRepository(), conversations)
 
     /** The ViewModel as the app creates it at launch, which also refreshes the profile. */
     private fun launch() = SessionViewModel(
@@ -191,6 +192,21 @@ class SessionViewModelTest {
         assertEquals("https://auth.example.com/logout", viewModel.pendingLogoutUrl.value)
         viewModel.onLogoutPageOpened()
         assertNull(viewModel.pendingLogoutUrl.value)
+    }
+
+    @Test
+    fun `tapping Sign out twice signs out once`() = runTest {
+        signedIn()
+        val wiping = CompletableDeferred<Unit>()
+        conversations.whileWiping = { wiping.await() }
+        val viewModel = launch()
+
+        viewModel.onSignOutClick()
+        viewModel.onSignOutClick()
+        wiping.complete(Unit)
+
+        assertEquals("https://auth.example.com/logout", viewModel.pendingLogoutUrl.value)
+        assertEquals(1, authClient.logoutPageRequests)
     }
 
     private companion object {

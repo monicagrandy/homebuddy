@@ -12,11 +12,14 @@ import chat.homebuddy.core.data.profile.ProfileRepository
 import chat.homebuddy.core.network.toApiError
 import java.io.IOException
 import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 
@@ -91,24 +94,36 @@ class SignInUseCase @Inject constructor(
  * Ends this phone's session (other devices stay signed in) and wipes what was cached for the
  * account. Every way a session ends comes through here: signing out, deleting the account, the
  * server rejecting the session, and leaving the beta.
+ *
+ * A singleton, so that every caller shares one lock: the session can be reported over several
+ * times at once (Sign out tapped twice, or several requests rejected together on OkHttp's threads).
  */
+@Singleton
 class EndSessionUseCase @Inject constructor(
     private val auth: AuthRepository,
     private val profile: ProfileRepository,
     private val documents: DocumentsRepository,
     private val conversations: ConversationsRepository,
 ) {
+    private val ending = Mutex()
+
     /**
      * Runs to the end even if the caller goes away, which it will: the signed-in screens, and
      * their ViewModels, are cleared as soon as the session ends. [reason] is shown on the sign-in
      * screen until the next sign-in attempt.
+     *
+     * One call ends the session at a time. A call that arrives meanwhile waits for it, finds the
+     * session already ended and does nothing, so the first call's reason is the one that's shown.
      */
     suspend operator fun invoke(reason: SignOutReason? = null) {
         withContext(NonCancellable) {
-            auth.clear(reason)
-            documents.wipe()
-            conversations.wipe()
-            profile.clear()
+            ending.withLock {
+                if (!auth.isSignedIn()) return@withLock
+                auth.clear(reason)
+                documents.wipe()
+                conversations.wipe()
+                profile.clear()
+            }
         }
     }
 }

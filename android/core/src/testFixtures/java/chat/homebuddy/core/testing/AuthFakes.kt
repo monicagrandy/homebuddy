@@ -22,7 +22,11 @@ class FakeAuthClient : AuthClient {
 
     override suspend fun exchange(code: SignInPageResult.Code) = exchange.invoke()
     override suspend fun refresh(refreshToken: String) = refresh.invoke(refreshToken)
-    override fun signOutUrl() = "https://auth.example.com/logout"
+    override fun signOutUrl() = "https://auth.example.com/logout".also { logoutPageRequests++ }
+
+    /** How many times the logout page's address was asked for. */
+    var logoutPageRequests = 0
+        private set
 }
 
 /** Stand-in for the Keystore cipher, which only exists on a device. */
