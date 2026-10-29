@@ -21,6 +21,7 @@ class TestProfileRepository : ProfileRepository {
 
     /** Runs at the start of each call to the server, so a test can hold one in flight. */
     var whileCalling: suspend () -> Unit = {}
+    var whileClearing: suspend () -> Unit = {}
 
     /** The ID and access tokens of the last sign-in. */
     var bootstrappedWith: Pair<String, String>? = null
@@ -51,6 +52,7 @@ class TestProfileRepository : ProfileRepository {
     }
 
     override suspend fun clear() {
+        whileClearing()
         cached.value = null
     }
 

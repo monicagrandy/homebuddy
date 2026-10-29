@@ -721,6 +721,29 @@
           "session_id": {
             "title": "Session Id",
             "type": "string"
+          },
+          "should_escalate": {
+            "default": false,
+            "title": "Should Escalate",
+            "type": "boolean"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/CitationOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "urgency_level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Urgency Level"
           }
         },
         "required": [

@@ -1,5 +1,6 @@
 package chat.homebuddy.core.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Embedded
@@ -9,8 +10,15 @@ import androidx.room.Query
 import androidx.room.Relation
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
+import androidx.room.TypeConverter
+import androidx.room.TypeConverters
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+import chat.homebuddy.core.network.HomeBuddyJson
+import chat.homebuddy.core.network.SourceDto
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.builtins.ListSerializer
 
 /** A read cache of the server's documents. The server always wins: a refresh replaces it. */
 @Entity(tableName = "documents", primaryKeys = ["householdId", "entryId"])
@@ -24,7 +32,7 @@ data class DocumentEntity(
     val uploadedAt: String?,
 )
 
-enum class UploadState { QUEUED, UPLOADING, INDEXING, FAILED, DUPLICATE }
+enum class UploadState { QUEUED, UPLOADING, INDEXING, FAILED, DUPLICATE, COMPLETED }
 
 /** A document being added from this phone, from picking it until the server has indexed it. */
 @Entity(tableName = "uploads")
@@ -34,7 +42,7 @@ data class UploadEntity(
     val householdId: Int,
     val displayName: String,
     val docType: String,
-    /** App-private copy of the picked PDF, kept until the server has it. */
+    /** App-private copy of the picked PDF, kept until indexing finishes or the upload is dismissed. */
     val filePath: String?,
     val url: String?,
     val state: UploadState,
@@ -43,6 +51,8 @@ data class UploadEntity(
     val errorCode: String? = null,
     val errorMessage: String? = null,
     val createdAt: Long,
+    /** A fresh key for an explicit retry of a terminal server job; null uses [id]. */
+    val attemptId: String? = null,
 )
 
 @Dao
@@ -83,6 +93,9 @@ abstract class UploadDao {
     @Upsert
     abstract suspend fun upsert(upload: UploadEntity)
 
+    @Query("UPDATE uploads SET filePath = NULL WHERE id = :id AND attemptId IS :attemptId AND state = :state AND filePath = :filePath")
+    abstract suspend fun clearInput(id: String, attemptId: String?, state: UploadState, filePath: String)
+
     @Query("DELETE FROM uploads WHERE id = :id")
     abstract suspend fun delete(id: String)
 
@@ -108,7 +121,27 @@ data class MessageEntity(
     val role: String,
     val content: String,
     val createdAt: String?,
+    /** Stable server identity; older cache rows acquire it on their next refresh. */
+    val serverId: Int? = null,
+    /** Answers only: what the answer cited and how urgent it was, as the server saved them with it. */
+    @ColumnInfo(defaultValue = "[]") val sources: List<SourceDto> = emptyList(),
+    val urgencyLevel: String? = null,
+    @ColumnInfo(defaultValue = "0") val shouldEscalate: Boolean = false,
 )
+
+/** Stores an answer's sources as JSON. */
+class SourcesConverter {
+    @TypeConverter
+    fun toJson(sources: List<SourceDto>): String = HomeBuddyJson.encodeToString(ListSerializer(SourceDto.serializer()), sources)
+
+    @TypeConverter
+    fun fromJson(json: String): List<SourceDto> = try {
+        HomeBuddyJson.decodeFromString(ListSerializer(SourceDto.serializer()), json)
+    } catch (_: IllegalArgumentException) {
+        // Unreadable (SerializationException is one). Only a cache: reopening the thread brings them back.
+        emptyList()
+    }
+}
 
 /** When the conversation list was last fetched in full, and the newest change seen since. */
 @Entity(tableName = "conversation_sync")
@@ -132,9 +165,14 @@ abstract class ConversationDao {
     @Upsert
     abstract suspend fun upsert(conversations: List<ConversationEntity>)
 
+    @Query("SELECT id FROM conversations WHERE householdId = :householdId")
+    abstract suspend fun idsForHousehold(householdId: Int): List<String>
+
+    /** A full server listing replaces thread metadata, preserving history for retained IDs. */
     @Transaction
     open suspend fun replaceAll(householdId: Int, conversations: List<ConversationEntity>) {
-        deleteForHousehold(householdId)
+        val retainedIds = conversations.map { it.id }.toSet()
+        idsForHousehold(householdId).filterNot { it in retainedIds }.forEach { delete(it) }
         upsert(conversations)
     }
 
@@ -266,11 +304,49 @@ abstract class ProfileDao {
         MessageEntity::class,
         ConversationSyncEntity::class,
     ],
-    version = 3,
+    version = 6,
 )
+@TypeConverters(SourcesConverter::class)
 abstract class HomeBuddyDatabase : RoomDatabase() {
     abstract fun profile(): ProfileDao
     abstract fun documents(): DocumentDao
     abstract fun uploads(): UploadDao
     abstract fun conversations(): ConversationDao
+
+    companion object {
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN serverId INTEGER")
+            }
+        }
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE uploads ADD COLUMN attemptId TEXT")
+            }
+        }
+
+        /** Cached answers get their details the next time their thread is loaded. */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN sources TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE messages ADD COLUMN urgencyLevel TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN shouldEscalate INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /** Every upgrade from version 3 on. Add one with each schema change. */
+        val MIGRATIONS = arrayOf(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+    }
 }
+
+/**
+ * How the database upgrades, for the app and its upgrade tests alike. Uploads waiting to be sent
+ * are the user's work, not a cache of the server's, so every schema change needs a migration
+ * that keeps them: without one, opening the database fails (and the upgrade tests with it)
+ * instead of deleting them. Only versions 1 and 2, which never shipped, start over, as does
+ * installing an older build over a newer one during development.
+ */
+fun RoomDatabase.Builder<HomeBuddyDatabase>.withHomeBuddyMigrations(): RoomDatabase.Builder<HomeBuddyDatabase> =
+    addMigrations(*HomeBuddyDatabase.MIGRATIONS)
+        .fallbackToDestructiveMigrationFrom(true, 1, 2)
+        .fallbackToDestructiveMigrationOnDowngrade(true)

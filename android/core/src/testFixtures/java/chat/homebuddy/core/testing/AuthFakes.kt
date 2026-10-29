@@ -11,6 +11,7 @@ import chat.homebuddy.core.auth.SecretCipher
 import chat.homebuddy.core.auth.SignInPageResult
 import chat.homebuddy.core.auth.TokenSet
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -18,7 +19,7 @@ import kotlinx.coroutines.sync.withLock
 /** Stand-in for Cognito. Each test sets what the code exchange and refresh return. */
 class FakeAuthClient : AuthClient {
     var exchange: suspend () -> TokenSet = { TokenSet("access-1", "id-1", "refresh-1", expiresAtMillis = null) }
-    var refresh: (String) -> TokenSet? = { TokenSet("access-2", "id-2", refreshToken = null, expiresAtMillis = null) }
+    var refresh: suspend (String) -> TokenSet? = { TokenSet("access-2", "id-2", refreshToken = null, expiresAtMillis = null) }
 
     override suspend fun exchange(code: SignInPageResult.Code) = exchange.invoke()
     override suspend fun refresh(refreshToken: String) = refresh.invoke(refreshToken)
@@ -40,8 +41,9 @@ class XorCipher(private val broken: Boolean = false) : SecretCipher {
 }
 
 /** The real [AuthRepository] on [client], keeping its session in memory instead of an encrypted file. */
-fun testAuthRepository(client: AuthClient = FakeAuthClient()): AuthRepository =
-    AuthRepository(client, AuthStore(InMemoryPreferences(), XorCipher()), AccessTokenCache())
+fun testAuthRepository(client: AuthClient = FakeAuthClient(), cache: AccessTokenCache = AccessTokenCache()): AuthRepository =
+    // The fake cipher does no IO; keep fixture operations on the test's coroutine scheduler.
+    AuthRepository(client, AuthStore(InMemoryPreferences(), XorCipher(), Dispatchers.Unconfined), cache)
 
 private class InMemoryPreferences : DataStore<Preferences> {
     private val current = MutableStateFlow(emptyPreferences())

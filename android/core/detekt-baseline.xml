@@ -1,0 +1,47 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:AccessTokenCache.kt:AccessTokenCache$(!forceRefresh || alreadyRefreshed) &amp;&amp; current != null &amp;&amp; current.isFresh()</ID>
+    <ID>ComplexCondition:CachedDocumentsRepository.kt:CachedDocumentsRepository$(action == UploadRetry.NEW_ATTEMPT || upload.jobId == null) &amp;&amp; upload.url == null &amp;&amp; !withContext(io) { upload.filePath?.let { File(it).isFile } ?: false }</ID>
+    <ID>ComplexCondition:FakeDaos.kt:FakeUploadDao$row != null &amp;&amp; row.attemptId == attemptId &amp;&amp; row.state == state &amp;&amp; row.filePath == filePath</ID>
+    <ID>ComplexCondition:TestDocumentsDataSources.kt:TestDocumentsLocalDataSource$row != null &amp;&amp; row.attemptId == upload.attemptId &amp;&amp; row.state == upload.state &amp;&amp; row.filePath == upload.filePath</ID>
+    <ID>CyclomaticComplexMethod:AccessTokenCache.kt:AccessTokenCache$suspend fun credentials: RequestCredentials?</ID>
+    <ID>MagicNumber:AuthStore.kt:KeystoreCipher$256</ID>
+    <ID>MagicNumber:ConversationsRemoteDataSource.kt:RetrofitConversationsRemoteDataSource$404</ID>
+    <ID>MagicNumber:DocumentsRemoteDataSource.kt:RetrofitDocumentsRemoteDataSource$404</ID>
+    <ID>MagicNumber:DocumentsRemoteDataSource.kt:RetrofitDocumentsRemoteDataSource$429</ID>
+    <ID>MagicNumber:DocumentsRemoteDataSource.kt:RetrofitDocumentsRemoteDataSource$500</ID>
+    <ID>MagicNumber:NetworkModule.kt:15</ID>
+    <ID>MagicNumber:NetworkModule.kt:60</ID>
+    <ID>MagicNumber:SessionUseCases.kt:RefreshProfileUseCase$401</ID>
+    <ID>MagicNumber:SessionUseCases.kt:RefreshProfileUseCase$403</ID>
+    <ID>MagicNumber:SessionUseCases.kt:SignInUseCase$403</ID>
+    <ID>MagicNumber:UploadWorker.kt:WorkManagerUploadScheduler$15</ID>
+    <ID>ReturnCount:AccessTokenCache.kt:AccessTokenCache$suspend fun credentials: RequestCredentials?</ID>
+    <ID>ReturnCount:AuthStore.kt:KeystoreCipher$private fun key: SecretKey?</ID>
+    <ID>ReturnCount:AuthenticatedClientTest.kt:FakeTokens$override suspend fun refresh: RequestCredentials?</ID>
+    <ID>ReturnCount:Authentication.kt:TokenAuthenticator$override fun authenticate: Request?</ID>
+    <ID>ReturnCount:SessionUseCases.kt:DeleteAccountUseCase$suspend operator fun invoke: DeleteAccountResult</ID>
+    <ID>ReturnCount:SessionUseCases.kt:SignInUseCase$suspend operator fun invoke: SignInResult</ID>
+    <ID>ReturnCount:SignInPage.kt:SignInPage$override fun parseResult: SignInPageResult</ID>
+    <ID>ReturnCount:SseParser.kt:SseParser$fun feed: String?</ID>
+    <ID>ReturnCount:UploadProcessor.kt:UploadProcessor$private suspend fun poll: UploadOutcome</ID>
+    <ID>ReturnCount:UploadProcessor.kt:UploadProcessor$private suspend fun processCurrent: UploadOutcome</ID>
+    <ID>ReturnCount:UploadProcessor.kt:UploadProcessor$private suspend fun submit: UploadEntity?</ID>
+    <ID>ReturnCount:UploadWorker.kt:UploadWorker$override suspend fun doWork: Result</ID>
+    <ID>ThrowsCount:AppAuthClient.kt:AppAuthClient$override suspend fun exchange: TokenSet</ID>
+    <ID>ThrowsCount:AuthStore.kt:AuthStore$suspend fun saveRefreshToken</ID>
+    <ID>ThrowsCount:QueryStreamClient.kt:QueryStreamClient.&lt;no name provided&gt;$override fun onResponse</ID>
+    <ID>TooGenericExceptionCaught:AccessTokenCache.kt:AccessTokenCache.SessionWork$failure: Throwable</ID>
+    <ID>TooGenericExceptionCaught:AuthStore.kt:AuthStore$failure: Exception</ID>
+    <ID>TooGenericExceptionCaught:QueryStreamClient.kt:QueryStreamClient.&lt;no name provided&gt;$failure: Exception</ID>
+    <ID>TooGenericExceptionCaught:SessionUseCases.kt:EndSessionUseCase$failure: Exception</ID>
+    <ID>TooGenericExceptionCaught:UploadWorker.kt:WorkManagerUploadScheduler$failure: Exception</ID>
+    <ID>TooManyFunctions:AuthRepository.kt:AuthRepository</ID>
+    <ID>TooManyFunctions:HomeBuddyApi.kt:HomeBuddyApi</ID>
+    <ID>WildcardImport:UploadRecoveryTest.kt:import org.junit.Assert.*</ID>
+    <ID>WildcardImport:UploadRetryIntegrationTest.kt:import org.junit.Assert.*</ID>
+    <ID>WildcardImport:WorkManagerUploadSchedulerTest.kt:import org.junit.Assert.*</ID>
+  </CurrentIssues>
+</SmellBaseline>

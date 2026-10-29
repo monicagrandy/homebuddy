@@ -103,7 +103,8 @@ private fun HomeBuddyRoot(
     val context = LocalContext.current
     LaunchedEffect(logoutUrl) {
         logoutUrl?.let { url ->
-            context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+            // Without a browser there's no hosted sign-in session to end, so there's nothing more to do.
+            startedOrMissing { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
             viewModel.onLogoutPageOpened()
         }
     }

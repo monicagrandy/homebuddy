@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -52,6 +53,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import chat.homebuddy.app.R
+import chat.homebuddy.app.webPageUrl
+import chat.homebuddy.core.network.HomeBuddyApi.Companion.CONVERSATION_LIST_LIMIT
 import chat.homebuddy.core.network.SourceDto
 import chat.homebuddy.designsystem.asString
 
@@ -67,46 +70,55 @@ data class ConversationListActions(
 @Composable
 fun ConversationListScreen(state: ConversationListUiState, actions: ConversationListActions, modifier: Modifier = Modifier) {
     Surface(modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize()) {
-            PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = actions.onRefresh, modifier = Modifier.fillMaxSize()) {
-                LazyColumn(
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    item { Text(stringResource(R.string.tab_chat), style = MaterialTheme.typography.headlineMedium) }
-                    item { Text(stringResource(R.string.retention_note), style = MaterialTheme.typography.bodySmall) }
-                    state.message?.let { message -> item { Banner(message.asString(), actions.onMessageShown) } }
-                    if (state.loaded && state.items.isEmpty()) {
-                        item {
-                            Text(
-                                stringResource(R.string.chat_empty),
-                                style = MaterialTheme.typography.bodyLarge,
-                                modifier = Modifier.padding(vertical = 24.dp),
-                            )
+        Column(Modifier.fillMaxSize()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.tab_chat), style = MaterialTheme.typography.headlineMedium)
+                Text(stringResource(R.string.retention_note), style = MaterialTheme.typography.bodySmall)
+                Text(
+                    stringResource(R.string.chat_history_limit, CONVERSATION_LIST_LIMIT),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = actions.onRefresh, modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        state.message?.let { message -> item { Banner(message.asString(), actions.onMessageShown) } }
+                        if (state.loaded && state.items.isEmpty()) {
+                            item {
+                                Text(
+                                    stringResource(R.string.chat_empty),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.padding(vertical = 24.dp),
+                                )
+                            }
                         }
-                    }
-                    items(state.items, key = { it.id }) { item ->
-                        Card(onClick = { actions.onOpen(item) }, modifier = Modifier.fillMaxWidth()) {
-                            Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(item.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Text(item.updatedLabel.asString(), style = MaterialTheme.typography.bodySmall)
-                                }
-                                IconButton(onClick = { actions.onDelete(item) }) {
-                                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.chat_delete_conversation_description, item.title))
+                        items(state.items, key = { it.id }) { item ->
+                            Card(onClick = { actions.onOpen(item) }, modifier = Modifier.fillMaxWidth()) {
+                                Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(item.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        Text(item.updatedLabel.asString(), style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    IconButton(onClick = { actions.onDelete(item) }) {
+                                        Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.chat_delete_conversation_description, item.title))
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                ExtendedFloatingActionButton(
+                    onClick = actions.onNew,
+                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                    text = { Text(stringResource(R.string.chat_new_question)) },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                )
             }
-            ExtendedFloatingActionButton(
-                onClick = actions.onNew,
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text(stringResource(R.string.chat_new_question)) },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-            )
         }
     }
 }
@@ -142,10 +154,12 @@ fun ConversationScreen(state: ConversationUiState, actions: ConversationActions,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             ) {
-                items(state.history) { message ->
-                    if (message.fromUser) UserBubble(message.content) else AnswerBlock(message.content)
+                itemsIndexed(state.history, key = { index, message -> "history-${message.id ?: "cached-$index"}" }) { _, message ->
+                    if (message.fromUser) UserBubble(message.content) else Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Answer(message.content, message.safety, message.sources, actions)
+                    }
                 }
-                items(state.turns) { turn -> Turn(turn, actions) }
+                items(state.turns, key = { "turn-${it.id}" }) { turn -> Turn(turn, actions) }
             }
             state.message?.let { Banner(it.asString(), actions.onMessageShown, Modifier.padding(horizontal = 16.dp)) }
             Composer(state, actions)
@@ -157,15 +171,14 @@ fun ConversationScreen(state: ConversationUiState, actions: ConversationActions,
 private fun Turn(turn: ChatTurn, actions: ConversationActions) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         UserBubble(turn.question)
-        turn.safety?.let { SafetyCard(it, actions.onCallEmergency) }
-        if (turn.answer.isNotEmpty()) AnswerBlock(turn.answer)
+        Answer(turn.answer, turn.safety, turn.sources, actions)
+        // Only shown before any text arrives, and sources come with the final answer, so it's never between them.
         turn.status?.let { status ->
             Column(Modifier.semantics { liveRegion = LiveRegionMode.Polite }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(status.asString(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LinearProgressIndicator(Modifier.fillMaxWidth(), trackColor = MaterialTheme.colorScheme.surfaceVariant)
             }
         }
-        if (turn.sources.isNotEmpty()) Sources(turn.sources, actions.onOpenSource)
         turn.error?.let {
             Text(it.asString(), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         }
@@ -184,6 +197,14 @@ private fun UserBubble(text: String) {
             Text(text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
         }
     }
+}
+
+/** An answer as it reads both live and in a reopened thread: its safety card, its text, then its sources. */
+@Composable
+private fun Answer(text: String, safety: SafetyAlert?, sources: List<SourceDto>, actions: ConversationActions) {
+    safety?.let { SafetyCard(it, actions.onCallEmergency) }
+    if (text.isNotEmpty()) AnswerBlock(text)
+    if (sources.isNotEmpty()) Sources(sources, actions.onOpenSource)
 }
 
 @Composable
@@ -226,10 +247,11 @@ private fun Sources(sources: List<SourceDto>, onOpen: (SourceDto) -> Unit) {
         Text(stringResource(R.string.chat_sources), style = MaterialTheme.typography.labelMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             sources.take(3).forEach { source ->
-                if (source.url != null) {
+                if (webPageUrl(source.url) != null) {
                     AssistChip(onClick = { onOpen(source) }, label = { Text(source.label(), maxLines = 1, overflow = TextOverflow.Ellipsis) })
                 } else {
-                    // Uploaded documents have no page to open, so they're a label rather than a button.
+                    // Uploaded documents have no page to open, and a link that isn't a web page is never
+                    // opened, so they're a label rather than a button.
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class CitationOut(BaseModel):
@@ -218,8 +218,17 @@ class ConversationMessageOut(BaseModel):
     role: str
     content: str
     created_at: datetime | None = None
+    # Answers only: what the live answer cited and how urgent it was. Empty for older answers.
+    sources: list[CitationOut] = Field(default_factory=list)
+    urgency_level: Optional[str] = None
+    should_escalate: bool = False
 
     model_config = {"from_attributes": True}
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def _no_sources_saved(cls, value):
+        return value or []
 
 
 class HouseholdCreate(BaseModel):

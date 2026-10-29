@@ -128,10 +128,21 @@ class ConversationContractTest {
     }
 
     @Test
-    fun `messages decode`() {
+    fun `messages decode, an answer with its sources`() {
         val messages = HomeBuddyJson.decodeFromJsonElement(ListSerializer(MessageDto.serializer()), body("conversation_messages.json"))
 
         assertEquals(listOf("user", "assistant"), messages.map { it.role })
+        assertEquals(SourceDto("bosch-dishwasher-manual", "Bosch Dishwasher Manual", 12, "manual", null), messages.last().sources.single())
+        assertEquals("low", messages.last().urgencyLevel)
+        assertTrue(messages.first().sources.isEmpty())
+    }
+
+    @Test
+    fun `a saved safety answer says it should escalate`() {
+        val messages = HomeBuddyJson.decodeFromJsonElement(ListSerializer(MessageDto.serializer()), body("conversation_messages_safety.json"))
+
+        assertEquals("critical", messages.last().urgencyLevel)
+        assertTrue(messages.last().shouldEscalate)
     }
 
     @Test

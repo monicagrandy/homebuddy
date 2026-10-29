@@ -25,10 +25,14 @@ class TestConversationsRepository : ConversationsRepository {
 
     /** Whether each sync asked for the full list, in order. */
     val syncs = mutableListOf<Boolean>()
+
+    /** The threads whose messages were loaded from the server, in order. */
+    val loaded = mutableListOf<String>()
     val asked = mutableListOf<Question>()
 
     /** The threads refreshed after an answer, in order. */
     val refreshedAfterAnswer = mutableListOf<String>()
+    var whileRefreshingAfterAnswer: suspend (Int, String) -> Unit = { _, _ -> }
 
     /** Runs at the start of each [wipe], so a test can hold one in flight. */
     var whileWiping: suspend () -> Unit = {}
@@ -55,6 +59,7 @@ class TestConversationsRepository : ConversationsRepository {
     }
 
     override suspend fun loadMessages(householdId: Int, conversationId: String): Boolean {
+        loaded += conversationId
         failure?.let { throw it }
         val messages = serverMessages[conversationId]
         if (messages == null) {
@@ -78,6 +83,7 @@ class TestConversationsRepository : ConversationsRepository {
 
     override suspend fun afterAnswer(householdId: Int, conversationId: String) {
         refreshedAfterAnswer += conversationId
+        whileRefreshingAfterAnswer(householdId, conversationId)
     }
 
     override suspend fun wipe() {

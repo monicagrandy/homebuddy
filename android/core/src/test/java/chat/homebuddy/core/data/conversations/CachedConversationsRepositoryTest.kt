@@ -2,6 +2,7 @@ package chat.homebuddy.core.data.conversations
 
 import chat.homebuddy.core.network.ConversationDto
 import chat.homebuddy.core.network.MessageDto
+import chat.homebuddy.core.network.SourceDto
 import chat.homebuddy.core.testing.httpError
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
@@ -56,12 +57,34 @@ class CachedConversationsRepositoryTest {
     @Test
     fun `once a day the full list replaces the cache, dropping threads deleted elsewhere`() = runTest {
         synced(thread("a", "2026-10-20T10:00:00+00:00"), thread("deleted-on-the-web", "2026-10-19T10:00:00+00:00"))
+        remote.messages["a"] = listOf(message(1, "user", "Q"), message(2, "assistant", "A"))
+        repository.loadMessages(7, "a")
+        val history = repository.messages("a").first()
         now += CachedConversationsRepository.FULL_SYNC_EVERY_MILLIS
 
         synced(thread("a", "2026-10-20T10:00:00+00:00"))
 
         assertNull(remote.listings.last())
         assertEquals(listOf("a"), cachedIds())
+        assertEquals(history, repository.messages("a").first())
+    }
+
+    @Test
+    fun `forcing a full list refresh preserves history even when the next message fetch is offline`() = runTest {
+        synced(thread("a", "2026-10-20T10:00:00+00:00"))
+        remote.messages["a"] = listOf(message(1, "user", "Q"), message(2, "assistant", "A"))
+        repository.loadMessages(7, "a")
+        val history = repository.messages("a").first()
+        remote.conversations = listOf(thread("a", "2026-10-21T10:00:00+00:00").copy(title = "Updated title"))
+
+        repository.sync(7, forceFull = true)
+        remote.failure = IOException("Offline")
+        val error = runCatching { repository.loadMessages(7, "a") }.exceptionOrNull()
+
+        assertTrue(error is IOException)
+        assertNull(remote.listings.last())
+        assertEquals("Updated title", repository.conversation("a").first()?.title)
+        assertEquals(history, repository.messages("a").first())
     }
 
     @Test
@@ -72,6 +95,35 @@ class CachedConversationsRepositoryTest {
         assertTrue(repository.loadMessages(7, "a"))
 
         assertEquals(listOf("user" to "Q", "assistant" to "A"), repository.messages("a").first().map { it.role to it.content })
+        assertEquals(listOf(1, 2), repository.messages("a").first().map { it.serverId })
+    }
+
+    @Test
+    fun `an answer's sources and urgency are kept with it`() = runTest {
+        val source = SourceDto("bosch-manual", "Bosch Dishwasher Manual", page = 12, docType = "manual", url = "https://example.com/bosch.pdf")
+        remote.messages["a"] = listOf(
+            message(1, "user", "I smell gas"),
+            message(2, "assistant", "Leave now.").copy(sources = listOf(source), urgencyLevel = "critical", shouldEscalate = true),
+        )
+
+        repository.loadMessages(7, "a")
+
+        val (question, answer) = repository.messages("a").first()
+        assertEquals(Triple(listOf(source), "critical", true), Triple(answer.sources, answer.urgencyLevel, answer.shouldEscalate))
+        assertEquals(Triple(emptyList<SourceDto>(), null, false), Triple(question.sources, question.urgencyLevel, question.shouldEscalate))
+    }
+
+    @Test
+    fun `server message IDs survive refreshes that change list positions`() = runTest {
+        remote.messages["a"] = listOf(message(1, "user", "Q"), message(2, "assistant", "A"))
+        repository.loadMessages(7, "a")
+
+        remote.messages["a"] = listOf(message(2, "assistant", "A"))
+        repository.loadMessages(7, "a")
+
+        val saved = repository.messages("a").first().single()
+        assertEquals(2, saved.serverId)
+        assertEquals(0, saved.position)
     }
 
     @Test

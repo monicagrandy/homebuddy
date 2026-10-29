@@ -96,34 +96,52 @@ def finish_query(session: Session, conversation_id: int) -> None:
     session.commit()
 
 
-def append_message(session: Session, conversation: Conversation, *, role: str, content: str) -> bool:
+def append_message(
+    session: Session, conversation: Conversation, *, role: str, content: str, answer: dict | None = None
+) -> bool:
     """Save a message. False (and nothing saved) if the thread was deleted meanwhile, e.g. on another device."""
+    return append_message_id(session, conversation, role=role, content=content, answer=answer) is not None
+
+
+def append_message_id(
+    session: Session, conversation: Conversation, *, role: str, content: str, answer: dict | None = None
+) -> int | None:
+    """Return the committed message ID, or None if its conversation was deleted.
+
+    `answer` is the query result an assistant message came from. Its citations and urgency are
+    saved with it, so the thread shows them again when it's reopened, on any device.
+    """
     # Read the id from the identity key: touching an expired attribute of a deleted row would raise.
     current = session.get(Conversation, _identity(conversation), populate_existing=True)
     if current is None:
         session.rollback()
-        return False
+        return None
     now = utc_now()
     current.updated_at = now
     if role == "user" and current.title is None:
         current.title = title_from(content)
-    session.add(
-        ConversationMessage(
-            conversation_id=current.id,
-            household_id=current.household_id,
-            session_id=current.session_id,
-            role=role,
-            content=content,
-            created_at=now,
-        )
+    message = ConversationMessage(
+        conversation_id=current.id,
+        household_id=current.household_id,
+        session_id=current.session_id,
+        role=role,
+        content=content,
+        created_at=now,
     )
+    if answer is not None:
+        message.sources = list(answer.get("sources") or [])
+        message.urgency_level = answer.get("urgency_level")
+        message.should_escalate = bool(answer.get("should_escalate"))
+    session.add(message)
     try:
+        session.flush()
+        message_id = message.id
         session.commit()
     except IntegrityError:
         # Deleted between the check above and this insert.
         session.rollback()
-        return False
-    return True
+        return None
+    return message_id
 
 
 def list_for_user(

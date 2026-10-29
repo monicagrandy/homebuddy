@@ -1,0 +1,16 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>DestructuringDeclarationWithTooManyEntries:Markdown.kt:val (bold, boldAlt, italic, italicAlt, code, linkText) = match.destructured</ID>
+    <ID>LongMethod:HomeSetupScreen.kt:@Composable fun HomeSetupScreen</ID>
+    <ID>MagicNumber:AddDocumentDialogs.kt:200</ID>
+    <ID>MagicNumber:ChatScreens.kt:3</ID>
+    <ID>MagicNumber:HomeSetupScreen.kt:5</ID>
+    <ID>MagicNumber:HomeSetupScreen.kt:50</ID>
+    <ID>MaxLineLength:AddDocumentDialogs.kt:confirmButton = { TextButton(onClick = { (link as? ManualLink.Valid)?.let(onConfirm) }, enabled = link is ManualLink.Valid) { Text(stringResource(R.string.documents_link_next)) } }</ID>
+    <ID>MaxLineLength:ChatScreens.kt:Text(it.asString(), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })</ID>
+    <ID>MaxLineLength:DocumentsScreen.kt:if (document.indexing) Text(stringResource(R.string.documents_indexing), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)</ID>
+    <ID>ReturnCount:ManualLinks.kt:fun parseManualLink: ManualLink</ID>
+  </CurrentIssues>
+</SmellBaseline>

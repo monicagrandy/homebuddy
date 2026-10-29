@@ -1,5 +1,6 @@
 package chat.homebuddy.core.data
 
+import chat.homebuddy.core.network.SourceDto
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -56,16 +57,58 @@ class ConversationDaoTest {
     }
 
     @Test
-    fun `replacing a home's threads drops the others and their messages, leaving other homes alone`() = runTest {
+    fun `an answer's sources and urgency are stored with it`() = runTest {
+        dao.upsert(listOf(thread("a")))
+        val answer = message("a", 0, "Leave now.").copy(
+            role = "assistant",
+            sources = listOf(SourceDto("ge-washer", "GE Washer", page = 3, docType = "manual", url = "https://example.com/ge.pdf")),
+            urgencyLevel = "critical",
+            shouldEscalate = true,
+        )
+
+        dao.replaceMessages("a", listOf(answer, message("a", 1)))
+
+        assertEquals(listOf(answer, message("a", 1)), dao.observeMessages("a").first())
+    }
+
+    @Test
+    fun `full sync updates retained threads without erasing history and removes only missing threads`() = runTest {
         dao.upsert(listOf(thread("kept"), thread("dropped"), thread("cabin", householdId = 8)))
+        val history = listOf(
+            message("kept", 0, "Offline question").copy(serverId = 101),
+            message("kept", 1, "Offline answer").copy(role = "assistant", serverId = 102),
+        )
+        dao.replaceMessages("kept", history)
         dao.replaceMessages("dropped", listOf(message("dropped", 0)))
         dao.replaceMessages("cabin", listOf(message("cabin", 0)))
+        val updated = thread("kept", updatedAt = "2026-10-22T10:00:00+00:00").copy(title = "Updated title")
 
-        dao.replaceAll(7, listOf(thread("kept")))
+        dao.replaceAll(7, listOf(updated, thread("new")))
 
-        assertEquals(listOf("kept"), ids())
+        assertEquals(listOf("kept", "new"), ids())
+        assertEquals(updated, dao.observeOne("kept").first())
+        assertEquals(history, dao.observeMessages("kept").first())
+        assertTrue(dao.observeMessages("new").first().isEmpty())
+        assertNull(dao.observeOne("dropped").first())
         assertTrue(dao.observeMessages("dropped").first().isEmpty())
-        assertEquals(1, dao.observeMessages("cabin").first().size)
+        assertEquals(thread("cabin", householdId = 8), dao.observeOne("cabin").first())
+        assertEquals(listOf(message("cabin", 0)), dao.observeMessages("cabin").first())
+    }
+
+    @Test
+    fun `an empty full sync deletes all threads and messages for only that home`() = runTest {
+        dao.upsert(listOf(thread("a"), thread("b"), thread("cabin", householdId = 8)))
+        listOf("a", "b", "cabin").forEach { dao.replaceMessages(it, listOf(message(it, 0))) }
+
+        dao.replaceAll(7, emptyList())
+
+        assertTrue(ids().isEmpty())
+        assertNull(dao.observeOne("a").first())
+        assertNull(dao.observeOne("b").first())
+        assertTrue(dao.observeMessages("a").first().isEmpty())
+        assertTrue(dao.observeMessages("b").first().isEmpty())
+        assertEquals(listOf("cabin"), ids(8))
+        assertEquals(listOf(message("cabin", 0)), dao.observeMessages("cabin").first())
     }
 
     @Test

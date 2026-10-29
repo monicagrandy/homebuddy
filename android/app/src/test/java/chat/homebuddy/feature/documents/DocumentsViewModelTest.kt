@@ -1,5 +1,7 @@
 package chat.homebuddy.feature.documents
 
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import chat.homebuddy.app.MainDispatcherRule
 import chat.homebuddy.app.R
 import chat.homebuddy.core.data.DocumentEntity
@@ -11,6 +13,7 @@ import chat.homebuddy.core.testing.httpError
 import chat.homebuddy.designsystem.asUiText
 import chat.homebuddy.designsystem.uiText
 import java.io.IOException
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -36,9 +39,15 @@ class DocumentsViewModelTest {
 
     private fun document(entryId: String, name: String) = DocumentEntity(7, entryId, name, "manual", "ready", null, null)
 
-    /** The documents tab, with its state collected as the screen would. */
-    private fun TestScope.documents() = DocumentsViewModel(ObserveCurrentHouseholdUseCase(profile), repository)
-        .also { viewModel -> backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.state.collect {} } }
+    private val link = parseManualLink("https://example.com/manual.pdf") as ManualLink.Valid
+
+    /** The documents tab, with its state collected as the screen would; [share] is what another app shared to it. */
+    private fun TestScope.documents(share: SharedDocument? = null, saved: SavedStateHandle = SavedStateHandle()) =
+        DocumentsViewModel(share, saved, ObserveCurrentHouseholdUseCase(profile), repository)
+            .also { viewModel -> backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.state.collect {} } }
+
+    /** The saved state as it comes back after process death: only what was in the bundle. */
+    private fun SavedStateHandle.afterProcessDeath() = SavedStateHandle(keys().associateWith { get<Any?>(it) })
 
     @Test
     fun `a home's documents and uploads are listed`() = runTest {
@@ -120,7 +129,7 @@ class DocumentsViewModelTest {
     }
 
     @Test
-    fun `a picked file that's too large or can't be read says so`() = runTest {
+    fun `a picked file that's too large, can't be read or can't be stored says so`() = runTest {
         profile.refresh()
         val viewModel = documents()
 
@@ -133,17 +142,30 @@ class DocumentsViewModelTest {
         viewModel.onFilePicked(manual)
         viewModel.addPickedFile("Bosch manual")
         assertEquals(uiText(R.string.documents_unreadable), viewModel.state.value.message)
+
+        repository.fileFailure = UploadFiles.CopyFailed(IOException("ENOSPC (No space left on device)"))
+        viewModel.onFilePicked(manual)
+        viewModel.addPickedFile("Bosch manual")
+        assertEquals(uiText(R.string.documents_copy_failed), viewModel.state.value.message)
     }
 
     @Test
-    fun `dismissing a picked file adds nothing`() = runTest {
+    fun `cancelling any step of adding adds nothing`() = runTest {
         profile.refresh()
         val viewModel = documents()
+
         viewModel.onFilePicked(manual)
-
-        viewModel.dismissPickedFile()
-
+        viewModel.cancelAdding()
         assertNull(viewModel.state.value.picked)
+
+        viewModel.onPasteLink()
+        viewModel.cancelAdding()
+        assertFalse(viewModel.state.value.pastingLink)
+
+        viewModel.onLinkChosen(link)
+        viewModel.cancelAdding()
+        assertNull(viewModel.state.value.pendingLink)
+
         assertTrue(repository.uploads(7).first().isEmpty())
     }
 
@@ -152,10 +174,81 @@ class DocumentsViewModelTest {
         profile.refresh()
         val viewModel = documents()
 
-        viewModel.addLink(ManualLink.Valid("https://example.com/manual.pdf", "example.com", "manual"), "Bosch manual")
+        viewModel.onLinkChosen(link)
+        assertEquals(link, viewModel.state.value.pendingLink)
+        viewModel.addPendingLink("Bosch manual")
 
+        assertNull(viewModel.state.value.pendingLink)
         assertEquals("Bosch manual", viewModel.state.value.uploads.single().name)
         assertEquals("https://example.com/manual.pdf", repository.uploads(7).first().single().url)
+    }
+
+    @Test
+    fun `a pasted link survives process death, while pasting and while naming it`() = runTest {
+        profile.refresh()
+        val pasting = SavedStateHandle()
+        documents(saved = pasting).onPasteLink()
+
+        val naming = pasting.afterProcessDeath()
+        val restoredWhilePasting = documents(saved = naming)
+        assertTrue(restoredWhilePasting.state.value.pastingLink)
+        restoredWhilePasting.onLinkChosen(link)
+
+        val restoredWhileNaming = documents(saved = naming.afterProcessDeath())
+        assertFalse(restoredWhileNaming.state.value.pastingLink)
+        assertEquals(link, restoredWhileNaming.state.value.pendingLink)
+        restoredWhileNaming.addPendingLink("Bosch manual")
+        assertEquals("https://example.com/manual.pdf", repository.uploads(7).first().single().url)
+    }
+
+    @Test
+    fun `a shared link is asked about once, across process death`() = runTest {
+        profile.refresh()
+        val share = SharedDocument.Link(link)
+        val saved = SavedStateHandle()
+        assertEquals(link, documents(share, saved).state.value.pendingLink)
+
+        // The destination still carries the share after process death; it's neither lost nor taken in again.
+        val restored = saved.afterProcessDeath()
+        val viewModel = documents(share, restored)
+        assertEquals(link, viewModel.state.value.pendingLink)
+        viewModel.cancelAdding()
+
+        assertNull(documents(share, restored.afterProcessDeath()).state.value.pendingLink)
+        assertTrue(repository.uploads(7).first().isEmpty())
+    }
+
+    @Test
+    fun `a shared file is asked about once, across process death`() = runTest {
+        profile.refresh()
+        repository.fileNames[manual] = "Bosch_SHX3AR75UC-manual.pdf"
+        val share = SharedDocument.File(manual)
+        val saved = SavedStateHandle()
+        assertEquals(PickedFile(manual, "Bosch SHX3AR75UC manual"), documents(share, saved).state.value.picked)
+
+        val restored = saved.afterProcessDeath()
+        val viewModel = documents(share, restored)
+        assertEquals(PickedFile(manual, "Bosch SHX3AR75UC manual"), viewModel.state.value.picked)
+        viewModel.addPickedFile("Bosch manual")
+
+        assertNull(documents(share, restored.afterProcessDeath()).state.value.picked)
+        assertEquals(listOf("Bosch manual"), repository.uploads(7).first().map { it.displayName })
+    }
+
+    @Test
+    fun `a picked file survives process death, even before its name was looked up`() = runTest {
+        profile.refresh()
+        repository.fileNames[manual] = "Bosch_SHX3AR75UC-manual.pdf"
+        val saved = SavedStateHandle()
+        val beforeDeath = documents(saved = saved)
+        // Killed while the name was being looked up.
+        beforeDeath.viewModelScope.cancel()
+        beforeDeath.onFilePicked(manual)
+        assertNull(beforeDeath.state.value.picked)
+
+        val restored = documents(saved = saved.afterProcessDeath())
+
+        assertEquals(PickedFile(manual, "Bosch SHX3AR75UC manual"), restored.state.value.picked)
     }
 
     @Test

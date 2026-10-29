@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, false, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.config import settings
@@ -244,6 +244,10 @@ class ConversationMessage(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Answers only: the citations and urgency the live answer showed, so history shows them too.
+    sources: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    urgency_level: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    should_escalate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
 
 
 class ContractorSearchUsage(Base):

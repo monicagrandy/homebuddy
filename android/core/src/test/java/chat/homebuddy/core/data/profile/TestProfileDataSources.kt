@@ -14,25 +14,32 @@ class TestProfileRemoteDataSource : ProfileRemoteDataSource {
     var user = UserDto(id = 1, cognitoSub = "s", email = "pat@example.com", displayName = "Pat")
     var households = listOf(HouseholdDto(id = 7, name = "Elm Street", zipCode = "80202", homeType = "condo", role = "owner"))
     var failure: Exception? = null
+    val calls = mutableListOf<String>()
+    var whileCalling: suspend (String) -> Unit = {}
     var deleted = false
         private set
 
-    override suspend fun bootstrap(idToken: String, accessToken: String) = answer { user }
+    override suspend fun bootstrap(idToken: String, accessToken: String) = answer("bootstrap") { user }
 
-    override suspend fun me() = answer { user }
+    override suspend fun me() = answer("me") { user }
 
-    override suspend fun households() = answer { households }
+    override suspend fun households() = answer("households") { households }
 
-    override suspend fun createHousehold(name: String, zipCode: String, homeType: String) = answer {
+    override suspend fun createHousehold(name: String, zipCode: String, homeType: String) = answer("createHousehold") {
         val id = (households.maxOfOrNull { it.id } ?: 0) + 1
         HouseholdDto(id = id, name = name, zipCode = zipCode, homeType = homeType, role = "owner").also { households = households + it }
     }
 
-    override suspend fun deleteAccount() = answer { deleted = true }
+    override suspend fun deleteAccount() = answer("deleteAccount") { deleted = true }
 
-    private fun <T> answer(block: () -> T): T {
-        failure?.let { throw it }
-        return block()
+    private suspend fun <T> answer(operation: String, block: () -> T): T {
+        calls += operation
+        val result = runCatching {
+            failure?.let { throw it }
+            block()
+        }
+        whileCalling(operation)
+        return result.getOrThrow()
     }
 }
 

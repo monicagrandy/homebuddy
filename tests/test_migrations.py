@@ -48,6 +48,35 @@ def test_sqlite_upgrade_matches_models_and_downgrades_cleanly(tmp_path):
     assert not APP_TABLES & set(inspect(engine).get_table_names())
 
 
+def test_sqlite_answer_details_keep_saved_messages(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'migrations.db'}")
+    upgrade_database(engine, "0004_conversations")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO users (id, cognito_sub, email) VALUES (1, 'sub', 'a@example.com')"))
+        connection.execute(text("INSERT INTO households (id, name, zip_code, home_type) VALUES (1, 'Home', '80202', 'condo')"))
+        connection.execute(
+            text("INSERT INTO conversations (id, household_id, user_id, session_id) VALUES (1, 1, 1, 'thread')")
+        )
+        connection.execute(
+            text(
+                "INSERT INTO conversation_messages (conversation_id, household_id, session_id, role, content) "
+                "VALUES (1, 1, 'thread', 'assistant', 'Clean the filter.')"
+            )
+        )
+
+    upgrade_database(engine)
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT content, sources, urgency_level, should_escalate FROM conversation_messages")
+        ).one()
+    assert tuple(row) == ("Clean the filter.", None, None, 0)
+
+    downgrade_database(engine, "0004_conversations")
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT content FROM conversation_messages")).scalar_one() == "Clean the filter."
+
+
 @pytest.fixture
 def postgres_engine():
     server_url = os.getenv("PG_TEST_URL")

@@ -1,8 +1,8 @@
 package chat.homebuddy.core.domain
 
 import chat.homebuddy.core.auth.AuthRepository
-import chat.homebuddy.core.auth.SignOutReason
 import chat.homebuddy.core.network.AccessTokenProvider
+import chat.homebuddy.core.network.RequestCredentials
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -14,17 +14,11 @@ class NetworkSession @Inject constructor(
     private val auth: AuthRepository,
     private val endSession: EndSessionUseCase,
 ) : AccessTokenProvider {
-    override suspend fun accessToken(forceRefresh: Boolean): String? = auth.accessToken(forceRefresh)
+    override suspend fun credentials(): RequestCredentials = auth.requestCredentials()
 
-    override suspend fun onSessionRejected() {
-        if (auth.isSignedIn()) {
-            // For example the account was deleted on another device, or the refresh token expired.
-            endSession(SignOutReason.SESSION_ENDED)
-        } else {
-            // A sign-in still being set up: SignInUseCase reports the failure.
-            auth.forgetUnsavedSignIn()
-        }
-    }
+    override suspend fun refresh(rejected: RequestCredentials): RequestCredentials? = auth.refreshCredentials(rejected)
+
+    override suspend fun onSessionRejected(rejected: RequestCredentials) = endSession.reject(rejected)
 }
 
 @Module

@@ -1,13 +1,14 @@
 package chat.homebuddy.feature.account
 
-import androidx.browser.customtabs.CustomTabsIntent
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import chat.homebuddy.app.R
+import chat.homebuddy.app.openWebPage
 
 @Composable
 fun AccountRoute(onSignOut: () -> Unit, modifier: Modifier = Modifier, viewModel: AccountViewModel = hiltViewModel()) {
@@ -17,7 +18,9 @@ fun AccountRoute(onSignOut: () -> Unit, modifier: Modifier = Modifier, viewModel
         AccountScreen(
             state = current,
             actions = AccountActions(
-                onOpenLink = { CustomTabsIntent.Builder().build().launchUrl(context, it.toUri()) },
+                onOpenLink = { url ->
+                    if (!context.openWebPage(url)) Toast.makeText(context, R.string.error_no_browser, Toast.LENGTH_LONG).show()
+                },
                 onSignOut = onSignOut,
                 onDelete = viewModel::delete,
             ),

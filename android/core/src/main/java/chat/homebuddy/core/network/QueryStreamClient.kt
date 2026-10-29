@@ -49,23 +49,27 @@ class QueryStreamClient(
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    response.use {
-                        if (!response.isSuccessful) {
-                            close(ApiException(parseApiError(response.code, response.body?.string(), response.header("Retry-After"))))
-                            return
-                        }
-                        try {
-                            val source = checkNotNull(response.body).source()
+                    try {
+                        response.use {
+                            if (!response.isSuccessful) {
+                                throw ApiException(parseApiError(response.code, response.body.readErrorBody(), response.header("Retry-After"), json))
+                            }
+                            val body = response.body ?: throw IOException("The server returned an empty response.")
+                            val contentType = body.contentType()
+                            if (contentType?.type != "text" || contentType.subtype != "event-stream") {
+                                throw IOException("The server did not return an event stream.")
+                            }
+                            val source = body.source()
                             val parser = SseParser()
                             while (true) {
                                 val line = source.readUtf8Line() ?: break
                                 parser.feed(line)?.let(::parseStreamEvent)?.let { trySendBlocking(it) }
                             }
                             parser.finish()?.let(::parseStreamEvent)?.let { trySendBlocking(it) }
-                            close()
-                        } catch (e: IOException) {
-                            close(e)
                         }
+                        close()
+                    } catch (failure: Exception) {
+                        close(failure as? IOException ?: IOException("Couldn't read the server response.", failure))
                     }
                 }
             },

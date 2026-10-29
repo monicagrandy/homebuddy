@@ -10,16 +10,16 @@ import chat.homebuddy.core.data.documents.DocumentsRepository
 import chat.homebuddy.core.data.profile.Household
 import chat.homebuddy.core.data.profile.ProfileRepository
 import chat.homebuddy.core.network.toApiError
+import chat.homebuddy.core.network.RequestCredentials
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 
@@ -30,6 +30,7 @@ class ObserveSessionUseCase @Inject constructor(
 ) {
     operator fun invoke(): Flow<SessionState> = combine(auth.state, profile.profile) { auth, profile ->
         when {
+            auth is AuthState.CleaningUp -> SessionState.Loading
             auth is AuthState.SignedOut -> SessionState.SignedOut(auth.reason)
             profile == null -> SessionState.Loading
             else -> SessionState.SignedIn(profile.user, profile.households)
@@ -53,26 +54,27 @@ sealed interface SignInResult {
 class SignInUseCase @Inject constructor(
     private val auth: AuthRepository,
     private val profile: ProfileRepository,
+    private val endSession: EndSessionUseCase,
 ) {
     /** Exchanges the code, sets up the profile, and only then keeps the session, so a failure leaves nothing behind. */
     suspend operator fun invoke(page: SignInPageResult): SignInResult {
-        auth.clearSignOutReason()
-        val code = when (page) {
-            is SignInPageResult.Code -> page
-            SignInPageResult.Cancelled -> return SignInResult.Cancelled
-            SignInPageResult.Failed -> return SignInResult.Failed
-        }
         val tokens = try {
-            auth.exchangeCode(code)
+            endSession.beforeSignIn {
+                auth.clearSignOutReason()
+                if (page is SignInPageResult.Code) {
+                    if (auth.isSignedIn()) throw SignInFailed("A session is already signed in.")
+                    auth.exchangeCode(page)
+                } else null
+            }
         } catch (_: IOException) {
             return SignInResult.Offline
         } catch (_: SignInFailed) {
             return SignInResult.Failed
-        }
+        } ?: return if (page == SignInPageResult.Cancelled) SignInResult.Cancelled else SignInResult.Failed
         var kept = false
         try {
             profile.bootstrap(tokens.idToken ?: return SignInResult.Failed, tokens.accessToken)
-            auth.keepSignedIn()
+            auth.withSessionTransition { auth.keepSignedIn(tokens) }
             kept = true
             return SignInResult.SignedIn
         } catch (error: HttpException) {
@@ -83,8 +85,9 @@ class SignInUseCase @Inject constructor(
             return SignInResult.Failed
         } finally {
             if (!kept) {
-                auth.forgetUnsavedSignIn()
-                withContext(NonCancellable) { profile.clear() }
+                withContext(NonCancellable) {
+                    auth.withSessionTransition { auth.forgetUnsavedSignIn(tokens) { profile.clear() } }
+                }
             }
         }
     }
@@ -105,24 +108,62 @@ class EndSessionUseCase @Inject constructor(
     private val documents: DocumentsRepository,
     private val conversations: ConversationsRepository,
 ) {
-    private val ending = Mutex()
-
     /**
-     * Runs to the end even if the caller goes away, which it will: the signed-in screens, and
-     * their ViewModels, are cleared as soon as the session ends. [reason] is shown on the sign-in
-     * screen until the next sign-in attempt.
-     *
-     * One call ends the session at a time. A call that arrives meanwhile waits for it, finds the
-     * session already ended and does nothing, so the first call's reason is the one that's shown.
+     * Captures this sign-in's identity before waiting for the transition lock. The durable cleanup
+     * marker outlives its credentials; a retry or next launch finishes it before another sign-in.
+     * The first reason is retained, and a delayed request cannot clear a newer sign-in, even to
+     * the same account. Caller cancellation doesn't interrupt cleanup once it has started.
      */
     suspend operator fun invoke(reason: SignOutReason? = null) {
         withContext(NonCancellable) {
-            ending.withLock {
-                if (!auth.isSignedIn()) return@withLock
-                auth.clear(reason)
-                documents.wipe()
-                conversations.wipe()
-                profile.clear()
+            val owner = auth.cleanupOwner() ?: return@withContext
+            end(owner, reason)
+        }
+    }
+
+    internal suspend fun end(owner: String, reason: SignOutReason?) = withContext(NonCancellable) {
+        auth.withSessionTransition {
+            if (auth.beginCleanup(owner, reason)) finishCleanup(owner)
+        }
+    }
+
+    /** Rechecks both the request's session and token after acquiring the transition lock. */
+    suspend fun reject(rejected: RequestCredentials) = withContext(NonCancellable) {
+        auth.withSessionTransition {
+            val owner = auth.rejectCredentials(rejected) { profile.clear() }
+            if (owner != null) finishCleanup(owner)
+        }
+    }
+
+    /** At startup, finish old session cleanup before restoring this session's background uploads. */
+    suspend fun reconcile() = withContext(NonCancellable) {
+        auth.withSessionTransition {
+            resumeCleanup()
+            if (auth.isSignedIn()) documents.reconcileUploads()
+        }
+    }
+
+    /** No new credentials or profile writes until global data deletion has finished. */
+    suspend fun <T> beforeSignIn(block: suspend () -> T): T = auth.withSessionTransition {
+        withContext(NonCancellable) { resumeCleanup() }
+        block()
+    }
+
+    private suspend fun resumeCleanup() {
+        val owner = auth.pendingCleanup() ?: return
+        if (auth.beginCleanup(owner, reason = null)) finishCleanup(owner)
+    }
+
+    private suspend fun finishCleanup(owner: String) {
+        try {
+            profile.clear()
+            documents.wipe()
+            conversations.wipe()
+            auth.completeCleanup(owner)
+        } catch (failure: Exception) {
+            when (failure) {
+                is CancellationException, is IOException -> throw failure
+                else -> throw IOException("Couldn't finish removing the previous session's data.", failure)
             }
         }
     }
@@ -150,10 +191,13 @@ class RefreshProfileUseCase @Inject constructor(
     private val profile: ProfileRepository,
     private val endSession: EndSessionUseCase,
 ) {
-    /** False when Home Buddy couldn't be reached or failed; the cached profile is kept. */
+    suspend fun hasPendingCleanup(): Boolean = auth.pendingCleanup() != null
+
+    /** False when pending cleanup or fetching the current profile needs a retry. */
     suspend operator fun invoke(): Boolean {
-        if (!auth.isSignedIn()) return true
         return try {
+            endSession.reconcile()
+            if (!auth.isSignedIn()) return true
             profile.refresh()
             true
         } catch (error: HttpException) {
@@ -161,8 +205,12 @@ class RefreshProfileUseCase @Inject constructor(
                 // The HTTP client has already ended the session (see NetworkSession).
                 401 -> true
                 403 -> {
-                    endSession(SignOutReason.NOT_IN_BETA)
-                    true
+                    try {
+                        endSession(SignOutReason.NOT_IN_BETA)
+                        true
+                    } catch (_: IOException) {
+                        false
+                    }
                 }
                 else -> false
             }
@@ -195,7 +243,11 @@ class DeleteAccountUseCase @Inject constructor(
             return DeleteAccountResult.Failed(error.toApiError().message)
         }
         // The account is gone on the server; this phone still has to end its session like any other.
-        endSession(SignOutReason.ACCOUNT_DELETED)
+        try {
+            endSession(SignOutReason.ACCOUNT_DELETED)
+        } catch (_: IOException) {
+            return DeleteAccountResult.Failed("Your account was deleted, but signing out needs to be retried.")
+        }
         return DeleteAccountResult.Deleted
     }
 }

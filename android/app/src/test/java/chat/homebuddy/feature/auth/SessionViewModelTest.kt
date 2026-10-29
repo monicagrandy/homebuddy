@@ -42,9 +42,9 @@ class SessionViewModelTest {
     private val authClient = FakeAuthClient()
     private val auth = testAuthRepository(authClient)
     private val profile = TestProfileRepository()
-    private val signIn = SignInUseCase(auth, profile)
     private val conversations = TestConversationsRepository()
     private val endSession = EndSessionUseCase(auth, profile, TestDocumentsRepository(), conversations)
+    private val signIn = SignInUseCase(auth, profile, endSession)
 
     /** The ViewModel as the app creates it at launch, which also refreshes the profile. */
     private fun launch() = SessionViewModel(
@@ -207,6 +207,41 @@ class SessionViewModelTest {
 
         assertEquals("https://auth.example.com/logout", viewModel.pendingLogoutUrl.value)
         assertEquals(1, authClient.logoutPageRequests)
+    }
+
+    @Test
+    fun `failed sign-out shows a retry that finishes cleanup before showing sign-in`() = runTest {
+        signedIn()
+        val viewModel = launch()
+        conversations.whileWiping = { throw IOException("disk unavailable") }
+
+        viewModel.onSignOutClick()
+
+        assertEquals(AppUiState.Loading(uiText(R.string.sign_out_cleanup_failed)), viewModel.state.value)
+        assertNull(viewModel.pendingLogoutUrl.value)
+        assertTrue(auth.pendingCleanup() != null)
+        conversations.whileWiping = {}
+
+        assertFalse(viewModel.onSignInClick())
+
+        assertEquals(signInScreen(), viewModel.state.value)
+        assertNull(auth.pendingCleanup())
+    }
+
+    @Test
+    fun `startup cleanup failures can be retried without opening the sign-in page`() = runTest {
+        signedIn()
+        conversations.whileWiping = { throw IOException("disk unavailable") }
+        runCatching { endSession(SignOutReason.ACCOUNT_DELETED) }
+
+        val viewModel = launch()
+        assertEquals(AppUiState.Loading(uiText(R.string.sign_out_cleanup_failed)), viewModel.state.value)
+
+        conversations.whileWiping = {}
+        assertFalse(viewModel.onSignInClick())
+
+        assertEquals(signInScreen(uiText(R.string.sign_in_account_deleted)), viewModel.state.value)
+        assertNull(auth.pendingCleanup())
     }
 
     private companion object {

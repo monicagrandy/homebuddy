@@ -70,7 +70,8 @@ class TestConversationsLocalDataSource : ConversationsLocalDataSource {
     override suspend fun upsert(conversations: List<ConversationEntity>) = threads.update { it + conversations.associateBy { thread -> thread.id } }
 
     override suspend fun replaceAll(householdId: Int, conversations: List<ConversationEntity>) {
-        val dropped = threads.value.values.filter { it.householdId == householdId }.map { it.id }
+        val retainedIds = conversations.map { it.id }.toSet()
+        val dropped = threads.value.values.filter { it.householdId == householdId && it.id !in retainedIds }.map { it.id }
         storedMessages.update { it - dropped.toSet() }
         threads.update { all -> all.filterValues { it.householdId != householdId } + conversations.associateBy { thread -> thread.id } }
     }

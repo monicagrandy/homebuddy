@@ -3,8 +3,10 @@ package chat.homebuddy.feature.documents
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.unit.Density
 import chat.homebuddy.app.R
 import chat.homebuddy.designsystem.HomeBuddyTheme
@@ -50,6 +52,7 @@ class DocumentsScreenScreenshotTest {
             }
         }
         compose.mainClock.advanceTimeBy(500)
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
         compose.onRoot().captureRoboImage("src/test/screenshots/$name.png")
     }
 
@@ -66,6 +69,17 @@ class DocumentsScreenScreenshotTest {
     fun errorBannerLargeFont() = capture("documents_error_font_200", fontScale = 2f) {
         DocumentsScreen(
             everything.copy(message = uiText(R.string.documents_delete_offline), uploads = emptyList()),
+            DocumentsActions(),
+        )
+    }
+
+    @Test
+    fun retryableFailure() = capture("documents_retryable_failure") {
+        DocumentsScreen(
+            DocumentsUiState(loaded = true, uploads = listOf(
+                UploadItem("retryable", "Dishwasher manual", UploadStatus.FAILED, message = "Indexing is unavailable. Try again later.".asUiText(), canRetry = true),
+                UploadItem("permanent", "Scanned warranty", UploadStatus.FAILED, message = "This PDF has no readable text.".asUiText()),
+            )),
             DocumentsActions(),
         )
     }

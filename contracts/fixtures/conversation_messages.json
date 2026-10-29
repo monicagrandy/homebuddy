@@ -12,7 +12,10 @@
       "session_id": "thread-1",
       "role": "user",
       "content": "How do I clean the dishwasher filter?",
-      "created_at": "2026-01-01T00:00:00Z"
+      "created_at": "2026-01-01T00:00:00Z",
+      "sources": [],
+      "urgency_level": null,
+      "should_escalate": false
     },
     {
       "id": 2,
@@ -20,7 +23,18 @@
       "session_id": "thread-1",
       "role": "assistant",
       "content": "Twist the filter counterclockwise, lift it out and rinse it under warm water (Bosch Dishwasher Manual, page 12).",
-      "created_at": "2026-01-01T00:00:00Z"
+      "created_at": "2026-01-01T00:00:00Z",
+      "sources": [
+        {
+          "entry_id": "bosch-dishwasher-manual",
+          "display_name": "Bosch Dishwasher Manual",
+          "page": 12,
+          "doc_type": "manual",
+          "url": null
+        }
+      ],
+      "urgency_level": "low",
+      "should_escalate": false
     }
   ]
 }

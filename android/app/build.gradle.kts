@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.detekt)
     alias(libs.plugins.roborazzi)
 }
 
@@ -91,6 +92,14 @@ android {
 // Reference images live next to the tests and are committed: ./gradlew recordRoborazziDevDebug, then verifyRoborazziDevDebug.
 roborazzi {
     outputDir.set(file("src/test/screenshots"))
+}
+
+
+// ./gradlew detekt. Findings the code had when detekt was added are in detekt-baseline.xml; new code must pass.
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(rootProject.file("config/detekt/detekt.yml"))
+    baseline = file("detekt-baseline.xml")
 }
 
 dependencies {

@@ -1,11 +1,9 @@
 package chat.homebuddy.feature.chat
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -20,11 +18,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import chat.homebuddy.app.R
+import chat.homebuddy.app.dial
+import chat.homebuddy.app.openWebPage
 
 @Composable
 fun ConversationListRoute(
@@ -127,9 +126,10 @@ fun ConversationRoute(
                     else -> microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
                 }
             },
-            // ACTION_DIAL fills in the number; the person places the call themselves.
-            onCallEmergency = { context.startActivity(Intent(Intent.ACTION_DIAL, "tel:911".toUri())) },
-            onOpenSource = { source -> source.url?.let { CustomTabsIntent.Builder().build().launchUrl(context, it.toUri()) } },
+            // The dialer fills in the number; the person places the call themselves.
+            onCallEmergency = { if (!context.dial("911")) viewModel.onExternalAppMissing(R.string.chat_no_dialer) },
+            // Only sources with a web page get a button (see Sources), so failing here means there's no browser.
+            onOpenSource = { source -> if (!context.openWebPage(source.url)) viewModel.onExternalAppMissing(R.string.error_no_browser) },
             onMessageShown = viewModel::messageShown,
         ),
         modifier = modifier,

@@ -1,4 +1,4 @@
-data: {"v": 1, "type": "user_accepted", "sanitized_query": "I smell gas in the kitchen", "input_blocked": false, "conversation_id": "thread-3"}
+data: {"v": 1, "type": "user_accepted", "sanitized_query": "I smell gas in the kitchen", "input_blocked": false, "conversation_id": "thread-3", "message_id": 5}
 
-data: {"v": 1, "type": "final", "result": {"answer": "Leave your home now and call 911 or your gas company from outside.", "query": "I smell gas in the kitchen", "sanitized_query": "I smell gas in the kitchen", "input_blocked": false, "route": ["safety_risk_agent"], "route_confidence": 0.92, "route_explanation": "Manual troubleshooting request", "urgency_level": "critical", "should_escalate": true, "case_draft": null, "task_draft": null, "contractor_suggestions": [], "retrieval_context": [], "sources": []}}
+data: {"v": 1, "type": "final", "result": {"answer": "Leave your home now and call 911 or your gas company from outside.", "query": "I smell gas in the kitchen", "sanitized_query": "I smell gas in the kitchen", "input_blocked": false, "route": ["safety_risk_agent"], "route_confidence": 0.92, "route_explanation": "Manual troubleshooting request", "urgency_level": "critical", "should_escalate": true, "case_draft": null, "task_draft": null, "contractor_suggestions": [], "retrieval_context": [], "sources": []}, "message_id": 6}
 

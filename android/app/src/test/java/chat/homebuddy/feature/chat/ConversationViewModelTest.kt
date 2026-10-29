@@ -1,6 +1,7 @@
 package chat.homebuddy.feature.chat
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import chat.homebuddy.app.MainDispatcherRule
 import chat.homebuddy.app.R
 import chat.homebuddy.core.data.ConversationEntity
@@ -9,6 +10,8 @@ import chat.homebuddy.core.domain.ObserveCurrentHouseholdUseCase
 import chat.homebuddy.core.network.ApiError
 import chat.homebuddy.core.network.ApiException
 import chat.homebuddy.core.network.StreamEvent
+import chat.homebuddy.core.network.QueryResultDto
+import chat.homebuddy.core.network.SourceDto
 import chat.homebuddy.core.testing.ContractFixtures
 import chat.homebuddy.core.testing.TestConversationsRepository
 import chat.homebuddy.core.testing.TestProfileRepository
@@ -16,6 +19,8 @@ import chat.homebuddy.designsystem.asUiText
 import chat.homebuddy.designsystem.uiText
 import java.io.IOException
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
@@ -46,6 +51,188 @@ class ConversationViewModelTest {
 
     private fun message(position: Int, role: String, content: String) =
         MessageEntity(conversationId = "filter", position = position, role = role, content = content, createdAt = null)
+
+    private fun savedMessages(id: String, question: String = "Question", answer: String = "Answer", firstId: Int = 101) = listOf(
+        MessageEntity(id, 0, "user", question, null, serverId = firstId),
+        MessageEntity(id, 1, "assistant", answer, null, serverId = firstId + 1),
+    )
+
+    private fun answer(firstId: Int = 101, text: String = "Answer") = flow {
+        emit(StreamEvent.UserAccepted("Question", false, null, firstId))
+        emit(StreamEvent.Token(text))
+        emit(StreamEvent.Final(QueryResultDto(text), firstId + 1))
+    }
+
+    @Test
+    fun `saved messages replace the live turn once without losing sources or safety`() = runTest {
+        profile.refresh()
+        val source = SourceDto("manual", "Manual")
+        repository.answer = flow {
+            emit(StreamEvent.UserAccepted("Sanitized question", false, null, 101))
+            emit(StreamEvent.Final(QueryResultDto("Answer", sources = listOf(source), shouldEscalate = true), 102))
+        }
+        repository.whileRefreshingAfterAnswer = { home, id ->
+            val (question, answer) = savedMessages(id, question = "Sanitized question")
+            repository.serverMessages[id] = listOf(question, answer.copy(sources = listOf(source), shouldEscalate = true))
+            repository.loadMessages(home, id)
+        }
+        val viewModel = conversation()
+        val observed = mutableListOf<ConversationUiState>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.state.collect { observed += it } }
+        viewModel.onDraftChange("Raw question")
+
+        viewModel.send()
+
+        val state = viewModel.state.value
+        assertTrue(state.turns.isEmpty())
+        assertEquals(listOf(101, 102), state.history.map { it.id })
+        assertEquals(listOf(source), state.history.last().sources)
+        assertEquals(SafetyAlert(true), state.history.last().safety)
+        assertTrue(observed.all { snapshot ->
+            snapshot.history.count { it.content == "Answer" } + snapshot.turns.count { it.answer == "Answer" } <= 1
+        })
+    }
+
+    @Test
+    fun `a partial refresh keeps the live turn until both saved messages arrive`() = runTest {
+        profile.refresh()
+        repository.answer = answer()
+        repository.whileRefreshingAfterAnswer = { home, id ->
+            repository.serverMessages[id] = savedMessages(id).take(1)
+            repository.loadMessages(home, id)
+        }
+        val viewModel = conversation()
+        viewModel.onDraftChange("Question")
+        viewModel.send()
+
+        assertEquals("Answer", viewModel.state.value.turns.single().answer)
+        assertTrue(viewModel.state.value.history.isEmpty())
+
+        val id = repository.asked.single().conversationId
+        repository.serverMessages[id] = savedMessages(id)
+        repository.loadMessages(7, id)
+
+        assertTrue(viewModel.state.value.turns.isEmpty())
+        assertEquals(listOf("Question", "Answer"), viewModel.state.value.history.map { it.content })
+    }
+
+    @Test
+    fun `cache confirmation before the final event never shows a second copy`() = runTest {
+        profile.refresh()
+        val final = CompletableDeferred<Unit>()
+        repository.answer = flow {
+            emit(StreamEvent.UserAccepted("Question", false, null, 101))
+            emit(StreamEvent.Token("Partial"))
+            final.await()
+            emit(StreamEvent.Final(QueryResultDto("Answer"), 102))
+        }
+        val viewModel = conversation()
+        viewModel.onDraftChange("Question")
+        viewModel.send()
+        val id = repository.asked.single().conversationId
+        repository.serverMessages[id] = savedMessages(id)
+
+        repository.loadMessages(7, id)
+
+        assertTrue(viewModel.state.value.history.isEmpty())
+        assertEquals("Partial", viewModel.state.value.turns.single().answer)
+        final.complete(Unit)
+        assertTrue(viewModel.state.value.turns.isEmpty())
+        assertEquals(listOf(101, 102), viewModel.state.value.history.map { it.id })
+    }
+
+    @Test
+    fun `identical question and answer text from separate turns stays separate`() = runTest {
+        profile.refresh()
+        repository.serverMessages["filter"] = savedMessages("filter", firstId = 1)
+        repository.answer = answer()
+        val refresh = CompletableDeferred<Unit>()
+        repository.whileRefreshingAfterAnswer = { home, id ->
+            refresh.await()
+            repository.serverMessages[id] = savedMessages(id, firstId = 1) + savedMessages(id).map { it.copy(position = it.position + 2) }
+            repository.loadMessages(home, id)
+        }
+        val viewModel = conversation(opened = "filter")
+        viewModel.onDraftChange("Question")
+        viewModel.send()
+
+        assertEquals(listOf(1, 2), viewModel.state.value.history.map { it.id })
+        assertEquals("Answer", viewModel.state.value.turns.single().answer)
+        refresh.complete(Unit)
+
+        assertTrue(viewModel.state.value.turns.isEmpty())
+        assertEquals(listOf(1, 2, 101, 102), viewModel.state.value.history.map { it.id })
+        assertEquals(2, viewModel.state.value.history.count { it.content == "Answer" })
+    }
+
+    @Test
+    fun `a failed refresh keeps the answer until a later reload confirms it`() = runTest {
+        profile.refresh()
+        repository.answer = answer()
+        val viewModel = conversation()
+        viewModel.onDraftChange("Question")
+        viewModel.send()
+
+        assertEquals("Answer", viewModel.state.value.turns.single().answer)
+        assertTrue(viewModel.state.value.history.isEmpty())
+        val id = repository.asked.single().conversationId
+        repository.serverMessages[id] = savedMessages(id)
+        repository.loadMessages(7, id)
+
+        assertTrue(viewModel.state.value.turns.isEmpty())
+        assertEquals(2, viewModel.state.value.history.size)
+    }
+
+    @Test
+    fun `a dropped stream uses its stable user ID to find the saved complete answer`() = runTest {
+        profile.refresh()
+        repository.answer = flow {
+            emit(StreamEvent.UserAccepted("Question", false, null, 101))
+            emit(StreamEvent.Token("Partial"))
+            throw IOException("connection lost before Final")
+        }
+        repository.whileRefreshingAfterAnswer = { home, id ->
+            repository.serverMessages[id] = savedMessages(id)
+            repository.loadMessages(home, id)
+        }
+        val viewModel = conversation()
+        viewModel.onDraftChange("Question")
+        viewModel.send()
+
+        assertTrue(viewModel.state.value.turns.isEmpty())
+        assertEquals(listOf("Question", "Answer"), viewModel.state.value.history.map { it.content })
+    }
+
+    @Test
+    fun `a final event does not allow another send before EOF and cannot mutate the next turn`() = runTest {
+        profile.refresh()
+        val eof = CompletableDeferred<Unit>()
+        repository.answer = flow {
+            emit(StreamEvent.UserAccepted("Question", false, null, 101))
+            emit(StreamEvent.Final(QueryResultDto("Answer"), 102))
+            eof.await()
+        }
+        val viewModel = conversation()
+        viewModel.onDraftChange("Question")
+        viewModel.send()
+        val first = viewModel.state.value.turns.single()
+        viewModel.onDraftChange("Next question")
+
+        viewModel.send()
+
+        assertFalse(viewModel.state.value.canSend)
+        assertEquals(1, repository.asked.size)
+        assertEquals("Next question", viewModel.state.value.draft)
+        eof.complete(Unit)
+        assertTrue(viewModel.state.value.canSend)
+        repository.answer = flow { emit(StreamEvent.Token("Next answer")); awaitCancellation() }
+        viewModel.send()
+
+        assertEquals(2, repository.asked.size)
+        assertEquals(first, viewModel.state.value.turns.first())
+        assertEquals("Next answer", viewModel.state.value.turns.last().answer)
+        viewModel.stopAnswer()
+    }
 
     @Test
     fun `dictation fills the draft and never sends on its own`() = runTest {
@@ -160,6 +347,23 @@ class ConversationViewModelTest {
     }
 
     @Test
+    fun `a reopened thread shows its answers' sources and safety card as they were live`() = runTest {
+        profile.refresh()
+        val source = SourceDto("gas-range", "GE Gas Range Manual", page = 4, url = "https://example.com/range.pdf")
+        repository.serverMessages["gas"] = listOf(
+            MessageEntity("gas", 0, "user", "I smell gas", null, serverId = 5),
+            MessageEntity("gas", 1, "assistant", "Leave now.", null, serverId = 6, sources = listOf(source), urgencyLevel = "critical"),
+            MessageEntity("gas", 2, "user", "Is the stove safe now?", null, serverId = 7),
+            MessageEntity("gas", 3, "assistant", "Have it checked first.", null, serverId = 8, urgencyLevel = "high"),
+        )
+
+        val history = conversation(opened = "gas").state.value.history
+
+        assertEquals(listOf(null, SafetyAlert(critical = true), null, SafetyAlert(critical = false)), history.map { it.safety })
+        assertEquals(listOf(emptyList(), listOf(source), emptyList(), emptyList()), history.map { it.sources })
+    }
+
+    @Test
     fun `opening a thread offline shows the saved copy`() = runTest {
         profile.refresh()
         repository.failure = IOException("No connection")
@@ -190,5 +394,71 @@ class ConversationViewModelTest {
 
         assertEquals(1, repository.asked.map { it.conversationId }.distinct().size)
         assertNull(conversation().state.value.title)
+    }
+
+    @Test
+    fun `when no app can place the call or open a source, the screen says what to do instead`() = runTest {
+        profile.refresh()
+        val viewModel = conversation()
+
+        viewModel.onExternalAppMissing(R.string.chat_no_dialer)
+        assertEquals(uiText(R.string.chat_no_dialer), viewModel.state.value.message)
+
+        viewModel.messageShown()
+        viewModel.onExternalAppMissing(R.string.error_no_browser)
+        assertEquals(uiText(R.string.error_no_browser), viewModel.state.value.message)
+    }
+
+    /** The saved state as it comes back after process death: only what was in the bundle. */
+    private fun SavedStateHandle.afterProcessDeath() = SavedStateHandle(keys().associateWith { get<Any?>(it) })
+
+    @Test
+    fun `a half-typed question survives process death`() = runTest {
+        profile.refresh()
+        listOf(null, "filter").forEach { opened ->
+            val saved = SavedStateHandle()
+            val before = conversation(opened, saved)
+            before.onDraftChange("Why does it smell")
+            before.viewModelScope.cancel()
+
+            assertEquals("Why does it smell", conversation(opened, saved.afterProcessDeath()).state.value.draft)
+        }
+    }
+
+    @Test
+    fun `a new thread sent before process death shows its saved answer once restored`() = runTest {
+        profile.refresh()
+        repository.answer = flow {
+            emit(StreamEvent.UserAccepted("Question", false, null, 101))
+            awaitCancellation()
+        }
+        val saved = SavedStateHandle()
+        val before = conversation(saved = saved)
+        before.onDraftChange("Question")
+        before.send()
+        before.viewModelScope.cancel()
+        // The server finished the answer and saved it while the app was gone.
+        val id = repository.asked.single().conversationId
+        repository.serverMessages[id] = savedMessages(id)
+
+        val state = conversation(saved = saved.afterProcessDeath()).state.value
+
+        assertEquals(listOf(id), repository.loaded)
+        assertEquals("Question", state.title)
+        assertEquals(listOf("Question", "Answer"), state.history.map { it.content })
+        assertEquals("", state.draft)
+    }
+
+    @Test
+    fun `a new thread never sent doesn't ask the server for its history once restored`() = runTest {
+        profile.refresh()
+        val saved = SavedStateHandle()
+        conversation(saved = saved).onDraftChange("Not sent yet")
+
+        val restored = conversation(saved = saved.afterProcessDeath())
+
+        assertTrue(repository.loaded.isEmpty())
+        assertFalse(restored.gone.value)
+        assertEquals("Not sent yet", restored.state.value.draft)
     }
 }

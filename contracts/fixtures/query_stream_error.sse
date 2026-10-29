@@ -1,4 +1,4 @@
-data: {"v": 1, "type": "user_accepted", "sanitized_query": "Why is it beeping?", "input_blocked": false, "conversation_id": "thread-4"}
+data: {"v": 1, "type": "user_accepted", "sanitized_query": "Why is it beeping?", "input_blocked": false, "conversation_id": "thread-4", "message_id": 7}
 
-data: {"v": 1, "type": "error", "message": "Something went wrong while answering. Please try again."}
+data: {"v": 1, "type": "error", "message": "Something went wrong while answering. Please try again.", "message_id": 8}
 

@@ -2,12 +2,19 @@ package chat.homebuddy.core.data.documents
 
 import chat.homebuddy.core.data.DocumentEntity
 import chat.homebuddy.core.data.FakeScheduler
+import chat.homebuddy.core.data.UploadEntity
 import chat.homebuddy.core.data.UploadState
 import chat.homebuddy.core.data.upload
 import chat.homebuddy.core.testing.httpError
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -105,6 +112,81 @@ class CachedDocumentsRepositoryTest {
     }
 
     @Test
+    fun `a file whose read fails partway isn't added and leaves no copy`() = runTest {
+        picked.streams[MANUAL] = object : InputStream() {
+            var sent = false
+            override fun read(): Int = throw UnsupportedOperationException()
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                if (sent) throw IOException("The other app stopped sharing it.")
+                sent = true
+                buffer.fill('%'.code.toByte(), offset, offset + length)
+                return length
+            }
+        }
+
+        val error = runCatching { repository.addFile(7, "Bosch manual", MANUAL) }.exceptionOrNull()
+
+        assertEquals("The other app stopped sharing it.", error?.message)
+        assertTrue(repository.uploads(7).first().isEmpty())
+        assertTrue(scheduler.scheduled.isEmpty())
+        assertTrue(uploadsDir.list().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun `adding cancelled before the upload is recorded leaves no copy`() = runTest {
+        val stalled = object : DocumentsLocalDataSource by local {
+            override suspend fun saveUpload(upload: UploadEntity): Unit = awaitCancellation()
+        }
+        val repository = CachedDocumentsRepository(
+            remote, stalled, picked, UploadFiles(uploadsDir), scheduler,
+            io = StandardTestDispatcher(testScheduler), newId = { "upload-1" },
+        )
+        val adding = launch { repository.addFile(7, "Bosch manual", MANUAL) }
+        runCurrent()
+        assertEquals(listOf("upload-1.pdf"), uploadsDir.list()?.toList())
+
+        adding.cancel()
+        adding.join()
+
+        assertTrue(uploadsDir.list().orEmpty().isEmpty())
+        assertTrue(local.allUploads().isEmpty())
+        assertTrue(scheduler.scheduled.isEmpty())
+    }
+
+    @Test
+    fun `adding cancelled just after the upload is recorded still schedules it`() = runTest {
+        val cancelledAfterSaving = object : DocumentsLocalDataSource by local {
+            override suspend fun saveUpload(upload: UploadEntity) {
+                local.saveUpload(upload)
+                throw CancellationException("Left the screen")
+            }
+        }
+        val repository = CachedDocumentsRepository(
+            remote, cancelledAfterSaving, picked, UploadFiles(uploadsDir), scheduler,
+            io = StandardTestDispatcher(testScheduler), newId = { "upload-1" },
+        )
+
+        val error = runCatching { repository.addFile(7, "Bosch manual", MANUAL) }.exceptionOrNull()
+
+        assertTrue(error is CancellationException)
+        assertEquals(listOf("upload-1"), scheduler.scheduled)
+        assertEquals("%PDF-1.4", File(local.upload("upload-1")!!.filePath!!).readText())
+    }
+
+    @Test
+    fun `reconciling removes copies no upload refers to`() = runTest {
+        val files = UploadFiles(uploadsDir)
+        local.saveUpload(upload("queued", file = files.save("queued", "%PDF-1.4".byteInputStream())))
+        files.save("never-recorded", "%PDF-1.4".byteInputStream())
+        File(uploadsDir, "killed-mid-copy.pdf.partial").writeText("%PDF")
+
+        repository.reconcileUploads()
+
+        assertEquals(listOf("queued.pdf"), uploadsDir.list()?.toList())
+        assertEquals(listOf("queued"), scheduler.ensured)
+    }
+
+    @Test
     fun `a picked file's name comes from the app that shared it`() = runTest {
         picked.names[MANUAL] = "Bosch_SHX3AR75UC.pdf"
 
@@ -131,8 +213,51 @@ class CachedDocumentsRepositoryTest {
     }
 
     @Test
+    fun `startup restores active rows and pending cleanup across homes without restarting user failures`() = runTest {
+        val rows = listOf(
+            upload("queued", url = "https://example.com/a.pdf"),
+            upload("uploading", state = UploadState.UPLOADING).copy(householdId = 8),
+            upload("indexing", state = UploadState.INDEXING, jobId = "job-1"),
+            upload("completed", state = UploadState.COMPLETED, jobId = "job-2"),
+            upload("duplicate-cleanup", state = UploadState.DUPLICATE).copy(filePath = "/pending.pdf"),
+            upload("rejected-cleanup", state = UploadState.FAILED).copy(filePath = "/rejected.pdf", errorCode = "not_pdf"),
+            upload("duplicate", state = UploadState.DUPLICATE),
+            upload("network", state = UploadState.FAILED).copy(filePath = "/retry.pdf", errorCode = "network"),
+            upload("index-failed", state = UploadState.FAILED).copy(filePath = "/retry.pdf", errorCode = "index_failed"),
+            upload("rejected", state = UploadState.FAILED).copy(errorCode = "not_pdf"),
+        )
+        rows.forEach { local.saveUpload(it) }
+
+        repository.reconcileUploads()
+
+        assertEquals(listOf("queued", "uploading", "indexing", "completed", "duplicate-cleanup", "rejected-cleanup"), scheduler.ensured)
+        assertTrue(scheduler.scheduled.isEmpty())
+        assertEquals(rows, local.allUploads())
+    }
+
+    @Test
+    fun `wipe waits for reconciliation then cancels its recovered work`() = runTest {
+        local.saveUpload(upload(url = "https://example.com/manual.pdf"))
+        val scheduling = CompletableDeferred<Unit>()
+        val resume = CompletableDeferred<Unit>()
+        scheduler.whileEnsuring = { scheduling.complete(Unit); resume.await() }
+        val recovering = launch { repository.reconcileUploads() }
+        scheduling.await()
+        val wiping = launch { repository.wipe() }
+        runCurrent()
+        assertFalse(wiping.isCompleted)
+        assertFalse(scheduler.cancelledAll)
+
+        resume.complete(Unit)
+        joinAll(recovering, wiping)
+
+        assertTrue(scheduler.cancelledAll)
+        assertTrue(local.allUploads().isEmpty())
+    }
+
+    @Test
     fun `retrying clears the error and schedules again`() = runTest {
-        local.saveUpload(upload().copy(state = UploadState.FAILED, errorCode = "network", errorMessage = "Offline"))
+        local.saveUpload(upload(url = "https://example.com/manual.pdf").copy(state = UploadState.FAILED, errorCode = "network", errorMessage = "Offline"))
 
         repository.retry("upload-1")
 
@@ -165,6 +290,40 @@ class CachedDocumentsRepositoryTest {
         assertTrue(repository.uploads(7).first().isEmpty())
         assertFalse(uploadsDir.exists())
         assertTrue(scheduler.cancelledAll)
+    }
+
+    @Test
+    fun `wiping waits for background upload cancellation before removing data`() = runTest {
+        cache("bosch-manual")
+        val cancelling = CompletableDeferred<Unit>()
+        val resume = CompletableDeferred<Unit>()
+        scheduler.whileCancellingAll = {
+            cancelling.complete(Unit)
+            resume.await()
+        }
+        val wiping = async { repository.wipe() }
+        cancelling.await()
+        try {
+            assertFalse(wiping.isCompleted)
+            assertEquals(listOf("bosch-manual"), cached())
+        } finally {
+            resume.complete(Unit)
+        }
+        wiping.await()
+        assertTrue(cached().isEmpty())
+    }
+
+    @Test
+    fun `failed background upload cancellation leaves a wipe that can be retried`() = runTest {
+        cache("bosch-manual")
+        scheduler.whileCancellingAll = { throw IOException("WorkManager unavailable") }
+
+        assertTrue(runCatching { repository.wipe() }.exceptionOrNull() is IOException)
+        assertEquals(listOf("bosch-manual"), cached())
+
+        scheduler.whileCancellingAll = {}
+        repository.wipe()
+        assertTrue(cached().isEmpty())
     }
 
     @Test

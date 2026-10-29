@@ -207,6 +207,9 @@ def generate(tmp_dir: Path) -> dict[str, str]:
         files["conversation_messages.json"] = _exchange(
             client.get("/conversations/thread-1/messages", params={"household_id": household_id})
         )
+        files["conversation_messages_safety.json"] = _exchange(
+            client.get("/conversations/thread-3/messages", params={"household_id": household_id})
+        )
 
         with client.session_local() as session:
             conversation_id = session.query(api.Conversation).filter_by(session_id="thread-1").one().id

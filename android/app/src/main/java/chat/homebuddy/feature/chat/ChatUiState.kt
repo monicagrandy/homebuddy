@@ -4,6 +4,7 @@ import chat.homebuddy.app.R
 import chat.homebuddy.designsystem.UiText
 import chat.homebuddy.designsystem.asUiText
 import chat.homebuddy.designsystem.uiText
+import chat.homebuddy.core.network.SourceDto
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
@@ -21,7 +22,14 @@ data class ConversationListUiState(
     val message: UiText? = null,
 )
 
-data class HistoryMessage(val fromUser: Boolean, val content: String)
+/** A saved message. An answer keeps the sources and safety card it had when it was live. */
+data class HistoryMessage(
+    val fromUser: Boolean,
+    val content: String,
+    val id: Int? = null,
+    val sources: List<SourceDto> = emptyList(),
+    val safety: SafetyAlert? = null,
+)
 
 data class ConversationUiState(
     /** Null until the first question: the screen says "New question". */
@@ -32,8 +40,9 @@ data class ConversationUiState(
     val listening: Boolean = false,
     val voiceAvailable: Boolean = true,
     val message: UiText? = null,
+    val requestInFlight: Boolean = false,
 ) {
-    val answering: Boolean get() = turns.lastOrNull()?.streaming == true
+    val answering: Boolean get() = requestInFlight || turns.lastOrNull()?.streaming == true
     val canSend: Boolean get() = draft.isNotBlank() && !answering
 }
 

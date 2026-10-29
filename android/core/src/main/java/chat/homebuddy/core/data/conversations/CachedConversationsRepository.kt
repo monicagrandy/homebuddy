@@ -81,5 +81,14 @@ class CachedConversationsRepository(
 internal fun ConversationDto.toEntity() =
     ConversationEntity(id = id, householdId = householdId, title = title, createdAt = createdAt, updatedAt = updatedAt)
 
-internal fun MessageDto.toEntity(conversationId: String, position: Int) =
-    MessageEntity(conversationId = conversationId, position = position, role = role, content = content, createdAt = createdAt)
+internal fun MessageDto.toEntity(conversationId: String, position: Int) = MessageEntity(
+    conversationId = conversationId,
+    position = position,
+    role = role,
+    content = content,
+    createdAt = createdAt,
+    serverId = id,
+    sources = sources,
+    urgencyLevel = urgencyLevel,
+    shouldEscalate = shouldEscalate,
+)

@@ -6,7 +6,7 @@ import chat.homebuddy.core.data.profile.User
 
 /** Where the app stands, derived from what's stored (see [ObserveSessionUseCase]); nothing holds it in memory. */
 sealed interface SessionState {
-    /** Reading the stored session, or signed in but the profile hasn't been fetched on this phone yet. */
+    /** Reading the session, finishing its previous cleanup, or fetching a missing signed-in profile. */
     data object Loading : SessionState
 
     data class SignedOut(val reason: SignOutReason?) : SessionState

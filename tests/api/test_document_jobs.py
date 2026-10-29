@@ -226,3 +226,53 @@ def test_uploads_still_index_and_deduplicate_with_encryption_on(client, househol
         raw = session.execute(api.text("SELECT file_bytes FROM documents")).scalar_one()
         assert bytes(raw).startswith(MARKER)
         assert session.query(Document).one().file_bytes == PDF
+
+
+@pytest.mark.parametrize("source", ["file", "url"])
+def test_terminal_failure_needs_a_fresh_key_and_recoverable_input(client, household_id, source):
+    from backend.models import IngestionJob
+    from backend.services.document_jobs import MAX_ATTEMPTS
+
+    class FailOnce(StubIngestion):
+        failed = False
+
+        def index(self, **kwargs):
+            if not self.failed:
+                self.failed = True
+                raise RuntimeError("Index temporarily unavailable")
+            return super().index(**kwargs)
+
+    ingestion = FailOnce()
+    runner = DocumentJobRunner(
+        session_factory=client.testing_session_local,
+        ingestion_service_factory=lambda: ingestion,
+        deletion_check_interval=0,
+    )
+    kwargs = {"url": "https://example.com/manual.pdf"} if source == "url" else {"content": PDF}
+    first = _upload(client, household_id, key="original-attempt", **kwargs).json()
+    with client.testing_session_local() as session:
+        pending = session.get(IngestionJob, first["job_id"])
+        pending.attempts = MAX_ATTEMPTS - 1
+        session.commit()
+    runner.run_next()
+    failed = client.get(f"/documents/jobs/{first['job_id']}").json()
+    assert (failed["status"], failed["error_code"]) == ("failed", "index_failed")
+    assert _documents(client, household_id) == []
+
+    replay = _upload(client, household_id, key="original-attempt", **kwargs)
+    assert replay.status_code == 200
+    assert replay.json()["job_id"] == first["job_id"]
+    assert replay.json()["status"] == "failed"
+
+    retry = _upload(client, household_id, key="fresh-attempt", **kwargs)
+    assert retry.status_code == 202
+    assert retry.json()["job_id"] != first["job_id"]
+    assert retry.json()["status"] == "queued"
+    runner.run_next()
+    completed = client.get(f"/documents/jobs/{retry.json()['job_id']}").json()
+    assert completed["status"] == "succeeded"
+    assert [document["status"] for document in _documents(client, household_id)] == ["ready"]
+    if source == "file":
+        assert ingestion.calls[-1]["file_bytes"] == PDF
+    else:
+        assert ingestion.calls[-1]["url"] == kwargs["url"]

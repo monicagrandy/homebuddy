@@ -6,6 +6,7 @@ import chat.homebuddy.core.network.DocumentDto
 import chat.homebuddy.core.network.DocumentJobDto
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
@@ -93,7 +94,16 @@ class TestDocumentsLocalDataSource : DocumentsLocalDataSource {
 
     override suspend fun upload(id: String) = uploads.value[id]
 
+    override suspend fun allUploads() = uploads.value.values.toList()
+
     override suspend fun saveUpload(upload: UploadEntity) = uploads.update { it + (upload.id to upload) }
+
+    override suspend fun clearUploadInput(upload: UploadEntity) = uploads.update { all ->
+        val row = all[upload.id]
+        if (row != null && row.attemptId == upload.attemptId && row.state == upload.state && row.filePath == upload.filePath) {
+            all + (row.id to row.copy(filePath = null))
+        } else all
+    }
 
     override suspend fun deleteUpload(id: String) = uploads.update { it - id }
 
@@ -103,12 +113,14 @@ class TestDocumentsLocalDataSource : DocumentsLocalDataSource {
     }
 }
 
-/** Files other apps have handed over, by address. A missing one can't be read. */
+/** Files other apps have handed over, by address; [streams] are opened exactly as given. A missing one can't be read. */
 class TestPickedFileDataSource : PickedFileDataSource {
     val contents = mutableMapOf<String, String>()
+    val streams = mutableMapOf<String, InputStream>()
     val names = mutableMapOf<String, String>()
 
     override suspend fun displayName(uri: String) = names[uri]
 
-    override suspend fun open(uri: String) = contents[uri]?.byteInputStream() ?: throw IOException("No permission to read $uri.")
+    override suspend fun open(uri: String) =
+        streams[uri] ?: contents[uri]?.byteInputStream() ?: throw IOException("No permission to read $uri.")
 }

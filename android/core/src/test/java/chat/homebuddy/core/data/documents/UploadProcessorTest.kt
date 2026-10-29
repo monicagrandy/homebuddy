@@ -173,4 +173,24 @@ class UploadProcessorTest {
         assertEquals(UploadState.FAILED, stored()?.state)
         assertEquals("network", stored()?.errorCode)
     }
+
+    @Test
+    fun `failed cleanup preserves the completed result and retries without contacting the job`() = runTest {
+        // A nonempty directory makes deletion fail without relying on host filesystem permissions.
+        val blocked = folder.newFolder("blocked-input")
+        val child = java.io.File(blocked, "open-data").apply { writeText("data") }
+        local.saveUpload(upload(file = blocked, state = UploadState.COMPLETED, jobId = "job-1"))
+
+        assertEquals(UploadOutcome.RETRY, processor.process("upload-1"))
+        assertEquals(UploadState.COMPLETED, stored()?.state)
+        assertEquals(blocked.absolutePath, stored()?.filePath)
+        assertTrue(remote.submitted.isEmpty())
+        assertEquals(0, remote.polls)
+
+        child.delete()
+        assertEquals(UploadOutcome.FINISHED, processor.process("upload-1"))
+        assertNull(stored())
+        assertFalse(blocked.exists())
+        assertEquals(0, remote.polls)
+    }
 }

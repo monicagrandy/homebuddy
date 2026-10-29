@@ -28,8 +28,20 @@ class UploadProcessor(
     private val maxPolls: Int = 100,
     private val wait: suspend (Long) -> Unit = { delay(it) },
 ) {
-    suspend fun process(uploadId: String): UploadOutcome {
+    suspend fun process(uploadId: String): UploadOutcome = try {
+        processCurrent(uploadId)
+    } catch (_: IOException) {
+        // A failed cleanup must leave its durable terminal result available for the next run.
+        UploadOutcome.RETRY
+    }
+
+    private suspend fun processCurrent(uploadId: String): UploadOutcome {
         var upload = local.upload(uploadId) ?: return UploadOutcome.FINISHED
+        if (upload.requiresInputCleanup) {
+            cleanupInput(upload)
+            return UploadOutcome.FINISHED
+        }
+        if (upload.state == UploadState.FAILED) return UploadOutcome.FINISHED
         if (upload.jobId == null) {
             upload = submit(upload) ?: return if (local.upload(uploadId)?.state == UploadState.QUEUED) UploadOutcome.RETRY else UploadOutcome.FINISHED
         }
@@ -39,7 +51,7 @@ class UploadProcessor(
     /** After the last attempt WorkManager allows, show the upload as failed so the user can retry it. */
     suspend fun giveUp(uploadId: String) {
         val upload = local.upload(uploadId) ?: return
-        if (upload.state == UploadState.FAILED || upload.state == UploadState.DUPLICATE) return
+        if (upload.state == UploadState.FAILED || upload.state == UploadState.DUPLICATE || upload.state == UploadState.COMPLETED) return
         local.saveUpload(
             upload.copy(state = UploadState.FAILED, errorCode = "network", errorMessage = "Couldn't upload. Check your connection and try again."),
         )
@@ -49,7 +61,7 @@ class UploadProcessor(
     private suspend fun submit(upload: UploadEntity): UploadEntity? {
         local.saveUpload(upload.copy(state = UploadState.UPLOADING))
         val submission = try {
-            remote.submit(upload.id, upload.householdId, upload.displayName, upload.docType, upload.filePath?.let(::File), upload.url)
+            remote.submit(upload.attemptId ?: upload.id, upload.householdId, upload.displayName, upload.docType, upload.filePath?.let(::File), upload.url)
         } catch (_: IOException) {
             JobSubmission.TryLater
         }
@@ -65,15 +77,14 @@ class UploadProcessor(
             }
         }
 
-        // The server has the file now; the local copy isn't needed any more.
-        files.delete(upload.filePath)
         if (job.status == "duplicate") {
-            local.saveUpload(
-                upload.copy(state = UploadState.DUPLICATE, filePath = null, entryId = job.duplicateOf ?: job.entryId),
-            )
+            val duplicate = upload.copy(state = UploadState.DUPLICATE, jobId = job.jobId, entryId = job.duplicateOf ?: job.entryId)
+            local.saveUpload(duplicate)
+            cleanupInput(duplicate)
             return null
         }
-        val indexing = upload.copy(state = UploadState.INDEXING, filePath = null, jobId = job.jobId, entryId = job.entryId)
+        // Keep the input until indexing finishes, so a terminal server failure can start a new attempt.
+        val indexing = upload.copy(state = UploadState.INDEXING, jobId = job.jobId, entryId = job.entryId)
         local.saveUpload(indexing)
         return indexing
     }
@@ -95,8 +106,9 @@ class UploadProcessor(
             }
             when (job.status) {
                 "succeeded" -> {
-                    local.deleteUpload(upload.id)
-                    refreshDocuments(upload.householdId)
+                    val completed = upload.copy(state = UploadState.COMPLETED)
+                    local.saveUpload(completed)
+                    cleanupInput(completed)
                     return UploadOutcome.FINISHED
                 }
                 "failed" -> {
@@ -110,8 +122,19 @@ class UploadProcessor(
     }
 
     private suspend fun fail(upload: UploadEntity, code: String, message: String) {
+        val failed = upload.copy(state = UploadState.FAILED, errorCode = code, errorMessage = message)
+        local.saveUpload(failed)
+        if (failed.requiresInputCleanup) cleanupInput(failed)
+    }
+
+    private suspend fun cleanupInput(upload: UploadEntity) {
         files.delete(upload.filePath)
-        local.saveUpload(upload.copy(state = UploadState.FAILED, filePath = null, errorCode = code, errorMessage = message))
+        if (upload.state == UploadState.COMPLETED) {
+            local.deleteUpload(upload.id)
+            refreshDocuments(upload.householdId)
+        } else if (upload.filePath != null) {
+            local.clearUploadInput(upload)
+        }
     }
 
     private suspend fun refreshDocuments(householdId: Int) {

@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.hilt) apply false
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.roborazzi) apply false
+    alias(libs.plugins.detekt) apply false
 }
 
 // The API contract recorded by the backend (../contracts). Tests read it, and rerun when it changes.

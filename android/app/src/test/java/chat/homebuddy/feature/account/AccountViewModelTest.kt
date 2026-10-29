@@ -43,7 +43,7 @@ class AccountViewModelTest {
     private fun TestScope.account() = AccountViewModel(profile, ObserveCurrentHouseholdUseCase(profile), DeleteAccountUseCase(profile, endSession))
         .also { viewModel -> backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { viewModel.state.collect {} } }
 
-    private suspend fun signedIn() = SignInUseCase(auth, profile)(SignInPageResult.Code("authorization-response"))
+    private suspend fun signedIn() = SignInUseCase(auth, profile, endSession)(SignInPageResult.Code("authorization-response"))
 
     @Test
     fun `nothing shows until the profile is cached`() = runTest {

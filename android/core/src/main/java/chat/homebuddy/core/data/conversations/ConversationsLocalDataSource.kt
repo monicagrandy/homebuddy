@@ -18,7 +18,7 @@ interface ConversationsLocalDataSource {
 
     suspend fun upsert(conversations: List<ConversationEntity>)
 
-    /** Replaces one home's threads; the ones dropped take their messages with them. */
+    /** Replaces one home's threads, preserving retained history; dropped threads take their messages with them. */
     suspend fun replaceAll(householdId: Int, conversations: List<ConversationEntity>)
 
     suspend fun replaceMessages(conversationId: String, messages: List<MessageEntity>)

@@ -69,6 +69,13 @@ class FakeUploadDao : UploadDao() {
 
     override suspend fun upsert(upload: UploadEntity) = stored.update { it + (upload.id to upload) }
 
+    override suspend fun clearInput(id: String, attemptId: String?, state: UploadState, filePath: String) {
+        stored.update { all ->
+            val row = all[id]
+            if (row != null && row.attemptId == attemptId && row.state == state && row.filePath == filePath) all + (id to row.copy(filePath = null)) else all
+        }
+    }
+
     override suspend fun delete(id: String) = stored.update { it - id }
 
     override suspend fun clear() {
@@ -90,6 +97,8 @@ class FakeConversationDao : ConversationDao() {
         storedMessages.map { all -> all.filter { it.conversationId == conversationId }.sortedBy { it.position } }
 
     override suspend fun upsert(conversations: List<ConversationEntity>) = threads.update { it + conversations.associateBy { thread -> thread.id } }
+
+    override suspend fun idsForHousehold(householdId: Int) = threads.value.values.filter { it.householdId == householdId }.map { it.id }
 
     override suspend fun insertMessages(messages: List<MessageEntity>) = storedMessages.update { all ->
         all.filterNot { old -> messages.any { it.conversationId == old.conversationId && it.position == old.position } } + messages

@@ -52,12 +52,12 @@ interface HomeBuddyApi {
     @GET("documents/jobs/{jobId}")
     suspend fun documentJob(@Path("jobId") jobId: String): DocumentJobDto
 
-    /** The signed-in user's threads, newest first. [updatedSince] (ISO 8601) fetches only changes. */
+    /** The signed-in user's threads, newest first, capped at [limit]. [updatedSince] fetches only changes. */
     @GET("conversations")
     suspend fun conversations(
         @Query("household_id") householdId: Int,
         @Query("updated_since") updatedSince: String? = null,
-        @Query("limit") limit: Int = 100,
+        @Query("limit") limit: Int = CONVERSATION_LIST_LIMIT,
     ): List<ConversationDto>
 
     @GET("conversations/{sessionId}/messages")
@@ -73,4 +73,9 @@ interface HomeBuddyApi {
      */
     @DELETE("me")
     suspend fun deleteAccount(): Response<Unit>
+
+    companion object {
+        /** Shared with the Chat screen's permanent history-limit notice. */
+        const val CONVERSATION_LIST_LIMIT = 100
+    }
 }

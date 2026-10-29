@@ -31,7 +31,7 @@ class SessionUseCasesTest {
     private val conversations = TestConversationsRepository()
     private val endSession = EndSessionUseCase(auth, profile, documents, conversations)
     private val observeSession = ObserveSessionUseCase(auth, profile)
-    private val signIn = SignInUseCase(auth, profile)
+    private val signIn = SignInUseCase(auth, profile, endSession)
     private val signOut = SignOutUseCase(endSession, auth)
     private val refreshProfile = RefreshProfileUseCase(auth, profile, endSession)
     private val deleteAccount = DeleteAccountUseCase(profile, endSession)
@@ -154,6 +154,7 @@ class SessionUseCasesTest {
 
         assertFalse(refreshProfile())
 
+        assertEquals(1, documents.reconciliations)
         assertEquals("Elm Street", (session() as SessionState.SignedIn).households.single().name)
     }
 
@@ -191,6 +192,18 @@ class SessionUseCasesTest {
         assertTrue(refreshProfile())
 
         assertNull(profile.profile.first())
+        assertEquals(0, documents.reconciliations)
+    }
+
+    @Test
+    fun `failed startup upload recovery can be retried without ending the session`() = runTest {
+        signedIn()
+        documents.whileReconciling = { throw IOException("WorkManager unavailable") }
+        assertFalse(refreshProfile())
+        assertTrue(auth.isSignedIn())
+        documents.whileReconciling = {}
+        assertTrue(refreshProfile())
+        assertEquals(1, documents.reconciliations)
     }
 
     @Test

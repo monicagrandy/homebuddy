@@ -10,6 +10,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import androidx.work.await
 import chat.homebuddy.core.data.documents.UploadOutcome
 import chat.homebuddy.core.data.documents.UploadProcessor
 import chat.homebuddy.core.data.documents.UploadScheduler
@@ -17,7 +18,9 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -51,21 +54,33 @@ class WorkManagerUploadScheduler(private val context: Context) : UploadScheduler
     private val workManager get() = WorkManager.getInstance(context)
 
     override fun schedule(uploadId: String) {
-        val request = OneTimeWorkRequestBuilder<UploadWorker>()
+        workManager.enqueueUniqueWork(workName(uploadId), ExistingWorkPolicy.REPLACE, request(uploadId))
+    }
+
+    override suspend fun ensureScheduled(uploadId: String) {
+        try {
+            workManager.enqueueUniqueWork(workName(uploadId), ExistingWorkPolicy.KEEP, request(uploadId)).await()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            throw IOException("Couldn't restore background uploads.", failure)
+        }
+    }
+
+    private fun request(uploadId: String) =
+        OneTimeWorkRequestBuilder<UploadWorker>()
             .setInputData(workDataOf(UploadWorker.KEY_UPLOAD_ID to uploadId))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
             .addTag(UploadWorker.TAG)
             .build()
-        workManager.enqueueUniqueWork(workName(uploadId), ExistingWorkPolicy.REPLACE, request)
-    }
 
     override fun cancel(uploadId: String) {
         workManager.cancelUniqueWork(workName(uploadId))
     }
 
-    override fun cancelAll() {
-        workManager.cancelAllWorkByTag(UploadWorker.TAG)
+    override suspend fun cancelAll() {
+        workManager.cancelAllWorkByTag(UploadWorker.TAG).await()
     }
 
     private fun workName(uploadId: String) = "upload-$uploadId"

@@ -5,8 +5,10 @@
     <string name="action_cancel">Cancel</string>
     <string name="action_delete">Delete</string>
     <string name="action_try_again">Try again</string>
+    <string name="sign_out_cleanup_failed">Couldn\'t finish signing out. Try again.</string>
     <string name="action_ok">OK</string>
     <string name="error_offline">Couldn\'t reach Home Buddy. Check your connection and try again.</string>
+    <string name="error_no_browser">No app on this device can open web pages.</string>
     <string name="retention_note">Chats are kept for 90 days after your last message.</string>
 
     <!-- Tabs -->
@@ -41,6 +43,7 @@
     <string name="home_setup_error_type">Choose a home type.</string>
 
     <!-- Chat -->
+    <string name="chat_history_limit">History sync is limited to your %1$d most recent conversations.</string>
     <string name="chat_empty">Ask about anything in your home\'s manuals and warranties, like \"Why is my dishwasher not draining?\"</string>
     <string name="chat_delete_conversation_description">Delete conversation %1$s</string>
     <string name="chat_new_question">New question</string>
@@ -53,6 +56,7 @@
     <string name="chat_safety_danger">This could be dangerous</string>
     <string name="chat_safety_advice">Get everyone to safety first. Home Buddy can\'t call anyone for you.</string>
     <string name="chat_call_911">Call 911</string>
+    <string name="chat_no_dialer">This device can\'t make phone calls. Call 911 from a phone right away.</string>
     <string name="chat_call_911_description">Call 911. Opens the phone app; you place the call.</string>
     <string name="chat_sources">From your documents</string>
     <string name="chat_source_page">%1$s · p. %2$d</string>
@@ -82,6 +86,7 @@
     <string name="documents_waiting">Waiting to upload…</string>
     <string name="documents_uploading">Uploading…</string>
     <string name="documents_reading">Reading the document…</string>
+    <string name="documents_added">Added</string>
     <string name="documents_open_link">Open link</string>
     <string name="documents_dismiss">Dismiss</string>
     <string name="documents_duplicate">Already in your documents.</string>
@@ -89,6 +94,7 @@
     <string name="documents_add_failed">The document couldn\'t be added.</string>
     <string name="documents_too_large">That PDF is larger than 50 MB.</string>
     <string name="documents_unreadable">Couldn\'t read that file.</string>
+    <string name="documents_copy_failed">Couldn\'t save that file on this phone. Free up some space and try again.</string>
     <string name="documents_delete_offline">Couldn\'t reach Home Buddy to delete it. Try again when you\'re online.</string>
     <string name="documents_default_name">Manual</string>
     <string name="documents_add_title">Add a document</string>
@@ -108,6 +114,7 @@
     <string name="documents_delete_text">Home Buddy will stop using it in answers, on every device. This can\'t be undone.</string>
     <string name="documents_qr_insecure">That QR code uses an insecure link, so it wasn\'t added.</string>
     <string name="documents_qr_not_a_link">That QR code doesn\'t contain a web link.</string>
+    <string name="documents_no_file_picker">No app on this device can pick files. Share the PDF to Home Buddy from another app instead.</string>
     <string name="documents_qr_unavailable">The QR scanner isn\'t available on this phone right now.</string>
 
     <!-- Account -->

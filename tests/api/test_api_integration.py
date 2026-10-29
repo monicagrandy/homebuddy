@@ -407,6 +407,9 @@ def test_query_persists_sanitized_messages_to_conversation_history(client: TestC
             "role": "user",
             "content": "How do I clean the dishwasher?",
             "created_at": messages_response.json()[0]["created_at"],
+            "sources": [],
+            "urgency_level": None,
+            "should_escalate": False,
         },
         {
             "id": 2,
@@ -415,6 +418,9 @@ def test_query_persists_sanitized_messages_to_conversation_history(client: TestC
             "role": "assistant",
             "content": "Clean the dishwasher filter and run a hot cycle.",
             "created_at": messages_response.json()[1]["created_at"],
+            "sources": [],
+            "urgency_level": None,
+            "should_escalate": False,
         },
     ]
 
@@ -545,6 +551,7 @@ def test_streaming_query_emits_token_events_and_persists_final_turn(client: Test
             "sanitized_query": "How do I clean the dishwasher?",
             "input_blocked": False,
             "conversation_id": "session-stream-1",
+            "message_id": 1,
         },
         {
             "v": 1,
@@ -564,6 +571,7 @@ def test_streaming_query_emits_token_events_and_persists_final_turn(client: Test
         {
             "v": 1,
             "type": "final",
+            "message_id": 2,
             "result": {
                 "answer": "Clean the filter.",
                 "query": "How do I clean the dishwasher filter?",
@@ -609,6 +617,9 @@ def test_streaming_query_emits_token_events_and_persists_final_turn(client: Test
             "role": "user",
             "content": "How do I clean the dishwasher?",
             "created_at": messages_response.json()[0]["created_at"],
+            "sources": [],
+            "urgency_level": None,
+            "should_escalate": False,
         },
         {
             "id": 2,
@@ -617,5 +628,8 @@ def test_streaming_query_emits_token_events_and_persists_final_turn(client: Test
             "role": "assistant",
             "content": "Clean the filter.",
             "created_at": messages_response.json()[1]["created_at"],
+            "sources": [],
+            "urgency_level": None,
+            "should_escalate": False,
         },
     ]

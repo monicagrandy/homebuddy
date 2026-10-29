@@ -1276,7 +1276,9 @@ def query(
                 role="user",
                 content=result.get("sanitized_query") or payload.question,
             )
-            conversation_store.append_message(session, conversation, role="assistant", content=result["answer"])
+            conversation_store.append_message(
+                session, conversation, role="assistant", content=result["answer"], answer=result
+            )
         return QueryResponse(**result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1330,10 +1332,13 @@ def query_stream(
         with SessionLocal() as persist_session, tracing_context(tags=trace_tags, metadata=trace_metadata):
             thread = persist_session.get(Conversation, conversation_pk)
 
-            def save(role: str, content: str) -> None:
+            def save(role: str, content: str, answer: dict | None = None) -> int | None:
                 # Skipped if the thread was deleted meanwhile (for example on another device).
                 if thread is not None:
-                    conversation_store.append_message(persist_session, thread, role=role, content=content)
+                    return conversation_store.append_message_id(
+                        persist_session, thread, role=role, content=content, answer=answer
+                    )
+                return None
 
             try:
                 for event in service.stream_query(
@@ -1350,7 +1355,7 @@ def query_stream(
                         event = {**event, "conversation_id": conversation_id}
                         if not sanitized_query and event.get("sanitized_query") is not None:
                             sanitized_query = event["sanitized_query"]
-                            save("user", sanitized_query)
+                            event = {**event, "message_id": save("user", sanitized_query)}
                     if event.get("type") == "final":
                         result = {
                             **event["result"],
@@ -1360,23 +1365,22 @@ def query_stream(
                                 raw_sources=event["result"].get("sources", []),
                             ),
                         }
-                        event = {**event, "result": result}
-                        save("assistant", result["answer"])
+                        event = {**event, "result": result, "message_id": save("assistant", result["answer"], result)}
                     emit(event)
             except (ValueError, SafetyBlockError, QueryEngineError) as exc:
                 message = _streaming_query_error_message(exc)
-                save("assistant", message)
-                emit({"type": "error", "message": message})
+                message_id = save("assistant", message)
+                emit({"type": "error", "message": message, "message_id": message_id})
             except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
                 logger.warning("Streaming query hit temporary AI provider error: %s", exc)
                 message = _streaming_query_error_message(exc)
-                save("assistant", message)
-                emit({"type": "error", "message": message})
+                message_id = save("assistant", message)
+                emit({"type": "error", "message": message, "message_id": message_id})
             except Exception:
                 # Unexpected errors can carry internal details, so the client only gets a generic message.
                 logger.exception("Streaming query failed")
-                save("assistant", _UNEXPECTED_QUERY_ERROR_MESSAGE)
-                emit({"type": "error", "message": _UNEXPECTED_QUERY_ERROR_MESSAGE})
+                message_id = save("assistant", _UNEXPECTED_QUERY_ERROR_MESSAGE)
+                emit({"type": "error", "message": _UNEXPECTED_QUERY_ERROR_MESSAGE, "message_id": message_id})
             finally:
                 _finish_conversation_query(persist_session, conversation_pk)
 

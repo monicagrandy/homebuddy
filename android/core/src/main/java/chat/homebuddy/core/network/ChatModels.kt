@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.intOrNull
 
 @Serializable
 data class ConversationDto(
@@ -27,6 +28,10 @@ data class MessageDto(
     val role: String,
     val content: String,
     @SerialName("created_at") val createdAt: String? = null,
+    /** Answers only: what the live answer cited and how urgent it was, so history shows the same. */
+    val sources: List<SourceDto> = emptyList(),
+    @SerialName("urgency_level") val urgencyLevel: String? = null,
+    @SerialName("should_escalate") val shouldEscalate: Boolean = false,
 )
 
 @Serializable
@@ -61,11 +66,11 @@ data class QueryResultDto(
 
 /** One event of a streamed answer (POST /query/stream). */
 sealed interface StreamEvent {
-    data class UserAccepted(val sanitizedQuery: String?, val inputBlocked: Boolean, val conversationId: String?) : StreamEvent
+    data class UserAccepted(val sanitizedQuery: String?, val inputBlocked: Boolean, val conversationId: String?, val messageId: Int? = null) : StreamEvent
     data class Status(val message: String) : StreamEvent
     data class Token(val text: String) : StreamEvent
-    data class Final(val result: QueryResultDto) : StreamEvent
-    data class Error(val message: String) : StreamEvent
+    data class Final(val result: QueryResultDto, val messageId: Int? = null) : StreamEvent
+    data class Error(val message: String, val messageId: Int? = null) : StreamEvent
 }
 
 /**
@@ -75,17 +80,19 @@ sealed interface StreamEvent {
 fun parseStreamEvent(data: String, json: Json = HomeBuddyJson): StreamEvent? {
     val event = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return null
     fun text(name: String) = event[name]?.let { runCatching { it.jsonPrimitive.contentOrNull }.getOrNull() }
+    val messageId = event["message_id"]?.let { runCatching { it.jsonPrimitive.intOrNull }.getOrNull() }
     return runCatching {
         when (text("type")) {
             "user_accepted" -> StreamEvent.UserAccepted(
                 sanitizedQuery = text("sanitized_query"),
                 inputBlocked = text("input_blocked") == "true",
                 conversationId = text("conversation_id"),
+                messageId = messageId,
             )
             "status" -> text("message")?.let(StreamEvent::Status)
             "token" -> text("text")?.let(StreamEvent::Token)
-            "final" -> StreamEvent.Final(json.decodeFromJsonElement(QueryResultDto.serializer(), event.getValue("result") as JsonObject))
-            "error" -> StreamEvent.Error(text("message") ?: "Something went wrong while answering. Please try again.")
+            "final" -> StreamEvent.Final(json.decodeFromJsonElement(QueryResultDto.serializer(), event.getValue("result") as JsonObject), messageId)
+            "error" -> StreamEvent.Error(text("message") ?: "Something went wrong while answering. Please try again.", messageId)
             else -> null
         }
     }.getOrNull()

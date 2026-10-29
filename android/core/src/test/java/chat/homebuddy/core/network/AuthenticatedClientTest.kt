@@ -5,6 +5,8 @@ import javax.inject.Provider
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -16,22 +18,30 @@ import retrofit2.HttpException
 
 class FakeTokens : AccessTokenProvider {
     var current: String? = "token-1"
+        set(value) {
+            field = value
+            revision++
+        }
+    var sessionId = "session-1"
+    private var revision = 0L
     var afterRefresh: String? = "token-2"
     var refreshError: IOException? = null
     var refreshes = 0
     var rejections = 0
 
-    override suspend fun accessToken(forceRefresh: Boolean): String? {
-        if (forceRefresh) {
-            refreshes++
-            refreshError?.let { throw it }
-            current = afterRefresh
-        }
-        return current
+    override suspend fun credentials() = RequestCredentials(sessionId, current, revision)
+
+    override suspend fun refresh(rejected: RequestCredentials): RequestCredentials? {
+        if (sessionId != rejected.sessionId) return null
+        if (credentials() != rejected) return credentials()
+        refreshes++
+        refreshError?.let { throw it }
+        current = afterRefresh
+        return credentials()
     }
 
-    override suspend fun onSessionRejected() {
-        rejections++
+    override suspend fun onSessionRejected(rejected: RequestCredentials) {
+        if (credentials() == rejected) rejections++
     }
 }
 
@@ -39,6 +49,7 @@ class AuthenticatedClientTest {
     private val server = MockWebServer()
     private val tokens = FakeTokens()
     private lateinit var api: HomeBuddyApi
+    private lateinit var http: OkHttpClient
 
     private val households = """[{"id": 1, "name": "Elm Street", "zip_code": "80202", "home_type": "condo", "role": "owner"}]"""
 
@@ -46,7 +57,8 @@ class AuthenticatedClientTest {
     fun setUp() {
         server.start()
         val config = ApiConfig(baseUrl = server.url("/").toString(), clientHeader = "android/9.9.9")
-        api = buildApi(config, buildHttpClient(config, Provider { tokens }))
+        http = buildHttpClient(config, Provider { tokens })
+        api = buildApi(config, http)
     }
 
     @After
@@ -79,6 +91,31 @@ class AuthenticatedClientTest {
         assertEquals(1, result.size)
         assertEquals("Bearer token-1", server.takeRequest().getHeader("Authorization"))
         assertEquals("Bearer token-2", server.takeRequest().getHeader("Authorization"))
+        assertEquals(1, tokens.refreshes)
+        assertEquals(0, tokens.rejections)
+    }
+
+    @Test
+    fun `a caller supplied Authorization header cannot reject the app session`() {
+        server.enqueue(unauthorized())
+        val request = Request.Builder().url(server.url("/households")).header("Authorization", "Bearer caller-token").build()
+
+        http.newCall(request).execute().use { assertEquals(401, it.code) }
+
+        assertEquals("Bearer caller-token", server.takeRequest().getHeader("Authorization"))
+        assertEquals(0, tokens.refreshes)
+        assertEquals(0, tokens.rejections)
+    }
+
+    @Test
+    fun `a redirect does not consume the authentication retry`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/redirected"))
+        server.enqueue(unauthorized())
+        server.enqueue(ok(households))
+
+        assertEquals(1, api.households().size)
+
+        assertEquals(3, server.requestCount)
         assertEquals(1, tokens.refreshes)
         assertEquals(0, tokens.rejections)
     }

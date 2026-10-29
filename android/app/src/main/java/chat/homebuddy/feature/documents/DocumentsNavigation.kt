@@ -1,9 +1,6 @@
 package chat.homebuddy.feature.documents
 
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
@@ -24,13 +21,9 @@ sealed interface SharedDocument {
 
 fun NavGraphBuilder.documentsDestination() {
     composable<DocumentsDestination> { entry ->
-        val destination = entry.toRoute<DocumentsDestination>()
-        // Asked about once: not again after rotation, or when coming back to this tab.
-        var shareOpened by rememberSaveable { mutableStateOf(false) }
-        DocumentsRoute(
-            share = destination.sharedDocument().takeUnless { shareOpened },
-            onShareOpened = { shareOpened = true },
-        )
+        // The ViewModel takes the share in once, and remembers that it did across rotation and process death.
+        val share = entry.toRoute<DocumentsDestination>().sharedDocument()
+        DocumentsRoute(viewModel = hiltViewModel<DocumentsViewModel, DocumentsViewModel.Factory> { it.create(share) })
     }
 }
 

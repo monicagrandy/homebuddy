@@ -175,6 +175,58 @@ def test_query_response_carries_resolved_sources(client: TestClient):
     assert response.json()["sources"] == EXPECTED_SOURCES
 
 
+class UrgentStreamService(ScriptedStreamService):
+    def stream_query(self, **kwargs):
+        yield {"type": "user_accepted", "sanitized_query": kwargs["user_query"], "input_blocked": False}
+        yield {"type": "final", "result": self.run_query(**kwargs)}
+
+    def run_query(self, **kwargs):
+        return {**FINAL_RESULT, "sources": self.sources, "urgency_level": "critical", "should_escalate": True}
+
+
+def test_reopened_history_shows_the_streamed_answers_sources_and_urgency(client: TestClient):
+    household_id = _setup_household(client)
+    _add_document(client, household_id, "bosch-manual", "Bosch Dishwasher Manual")
+    _add_document(client, household_id, "ge-washer", "GE Washer", url="https://example.com/ge.pdf")
+    api.app.dependency_overrides[api.get_query_service] = lambda: UrgentStreamService(sources=RAW_SOURCES)
+
+    final = _events(
+        client.post("/query/stream", json={"question": "I smell gas", "session_id": "s-details", "household_id": household_id})
+    )[-1]
+    question, answer = client.get("/conversations/s-details/messages", params={"household_id": household_id}).json()
+
+    assert answer["sources"] == final["result"]["sources"] == EXPECTED_SOURCES
+    assert (answer["urgency_level"], answer["should_escalate"]) == ("critical", True)
+    assert (question["sources"], question["urgency_level"], question["should_escalate"]) == ([], None, False)
+
+
+def test_reopened_history_shows_a_non_streamed_answers_sources_and_urgency(client: TestClient):
+    household_id = _setup_household(client)
+    _add_document(client, household_id, "bosch-manual", "Bosch Dishwasher Manual")
+    _add_document(client, household_id, "ge-washer", "GE Washer", url="https://example.com/ge.pdf")
+    api.app.dependency_overrides[api.get_query_service] = lambda: UrgentStreamService(sources=RAW_SOURCES)
+
+    client.post("/query", json={"question": "I smell gas", "session_id": "s-details", "household_id": household_id})
+    answer = client.get("/conversations/s-details/messages", params={"household_id": household_id}).json()[-1]
+
+    assert answer["sources"] == EXPECTED_SOURCES
+    assert (answer["urgency_level"], answer["should_escalate"]) == ("critical", True)
+
+
+def test_answers_saved_without_details_have_none(client: TestClient):
+    household_id = _setup_household(client)
+    api.app.dependency_overrides[api.get_query_service] = lambda: ScriptedStreamService()
+    client.post("/query/stream", json={"question": "Hello?", "session_id": "s-old", "household_id": household_id})
+    with client.testing_session_local() as session:
+        # Saved before answers kept their details.
+        session.query(ConversationMessage).update({"sources": None, "urgency_level": None})
+        session.commit()
+
+    answer = client.get("/conversations/s-old/messages", params={"household_id": household_id}).json()[-1]
+
+    assert (answer["sources"], answer["urgency_level"], answer["should_escalate"]) == ([], None, False)
+
+
 def test_sources_never_include_another_households_documents(client: TestClient):
     household_id = _setup_household(client)
     other_household_id = client.post(
@@ -186,3 +238,40 @@ def test_sources_never_include_another_households_documents(client: TestClient):
         resolved = api._resolve_sources(session, household_id=household_id, raw_sources=RAW_SOURCES)
 
     assert resolved == []
+
+
+def test_stream_message_ids_match_persisted_history_even_for_repeated_text(client: TestClient):
+    household_id = _setup_household(client)
+    api.app.dependency_overrides[api.get_query_service] = lambda: ScriptedStreamService()
+    streamed_ids = []
+    for _ in range(2):
+        response = client.post(
+            "/query/stream",
+            json={"question": "Same question", "session_id": "s-ids", "household_id": household_id},
+        )
+        events = _events(response)
+        streamed_ids.extend(event["message_id"] for event in events)
+    history = client.get("/conversations/s-ids/messages", params={"household_id": household_id}).json()
+
+    assert streamed_ids == [message["id"] for message in history]
+    assert len(set(streamed_ids)) == 4
+    assert [message["role"] for message in history] == ["user", "assistant", "user", "assistant"]
+
+
+def test_stream_error_identifies_the_saved_error_message(client: TestClient):
+    class FailingService:
+        def stream_query(self, **kwargs):
+            yield {"type": "user_accepted", "sanitized_query": kwargs["user_query"], "input_blocked": False}
+            raise ValueError("Could not answer")
+
+    household_id = _setup_household(client)
+    api.app.dependency_overrides[api.get_query_service] = FailingService
+    response = client.post(
+        "/query/stream", json={"question": "Hello?", "session_id": "s-error-id", "household_id": household_id}
+    )
+    events = _events(response)
+    history = client.get("/conversations/s-error-id/messages", params={"household_id": household_id}).json()
+
+    assert events[-1]["type"] == "error"
+    assert [event["message_id"] for event in events] == [message["id"] for message in history]
+    assert events[-1]["message"] == history[-1]["content"]

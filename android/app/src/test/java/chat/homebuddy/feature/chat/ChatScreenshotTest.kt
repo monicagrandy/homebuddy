@@ -64,6 +64,48 @@ class ChatScreenshotTest {
     fun emptyList() = capture("chat_list_empty") { ConversationListScreen(ConversationListUiState(loaded = true), ConversationListActions()) }
 
     @Test
+    fun conversationListDark() = capture("chat_list_dark", dark = true) { ConversationListScreen(conversations, ConversationListActions()) }
+
+    @Test
+    fun conversationListLargeFont() = capture("chat_list_font_150", fontScale = 1.5f) { ConversationListScreen(conversations, ConversationListActions()) }
+
+    @Test
+    @Config(qualifiers = "w400dp-h400dp-mdpi")
+    fun conversationList400x400() = capture("chat_list_400x400") { ConversationListScreen(conversations, ConversationListActions()) }
+
+    @Test
+    @Config(qualifiers = "w400dp-h500dp-mdpi")
+    fun conversationList400x500() = capture("chat_list_400x500") { ConversationListScreen(conversations, ConversationListActions()) }
+
+    @Test
+    @Config(qualifiers = "w400dp-h1000dp-mdpi")
+    fun conversationList400x1000() = capture("chat_list_400x1000") { ConversationListScreen(conversations, ConversationListActions()) }
+
+    @Test
+    @Config(qualifiers = "w610dp-h400dp-mdpi")
+    fun conversationList610x400() = capture("chat_list_610x400") { ConversationListScreen(conversations, ConversationListActions()) }
+
+    @Test
+    @Config(qualifiers = "w610dp-h500dp-mdpi")
+    fun conversationList610x500() = capture("chat_list_610x500") { ConversationListScreen(conversations, ConversationListActions()) }
+
+    @Test
+    @Config(qualifiers = "w610dp-h1000dp-mdpi")
+    fun conversationList610x1000() = capture("chat_list_610x1000") { ConversationListScreen(conversations, ConversationListActions()) }
+
+    @Test
+    @Config(qualifiers = "w900dp-h400dp-mdpi")
+    fun conversationList900x400() = capture("chat_list_900x400") { ConversationListScreen(conversations, ConversationListActions()) }
+
+    @Test
+    @Config(qualifiers = "w900dp-h500dp-mdpi")
+    fun conversationList900x500() = capture("chat_list_900x500") { ConversationListScreen(conversations, ConversationListActions()) }
+
+    @Test
+    @Config(qualifiers = "w900dp-h1000dp-mdpi")
+    fun conversationList900x1000() = capture("chat_list_900x1000") { ConversationListScreen(conversations, ConversationListActions()) }
+
+    @Test
     fun streaming() = capture("chat_streaming") {
         ConversationScreen(
             ConversationUiState(
@@ -104,6 +146,23 @@ class ChatScreenshotTest {
 
     @Test
     fun safetyDark() = capture("chat_safety_dark", dark = true) { ConversationScreen(gas, ConversationActions()) }
+
+    /** Reopened later or on another device, the same answers look as they did live. */
+    @Test
+    fun reopened() = capture("chat_reopened_with_safety_and_sources") {
+        ConversationScreen(
+            ConversationUiState(
+                title = "I smell gas in the kitchen",
+                history = listOf(
+                    HistoryMessage(true, "I smell gas in the kitchen", id = 5),
+                    HistoryMessage(false, gas.turns.single().answer, id = 6, safety = SafetyAlert(critical = true)),
+                    HistoryMessage(true, "How do I clean the dishwasher filter?", id = 7),
+                    HistoryMessage(false, answer, id = 8, sources = sources),
+                ),
+            ),
+            ConversationActions(),
+        )
+    }
 
     @Test
     fun busyElsewhere() = capture("chat_busy_409") {

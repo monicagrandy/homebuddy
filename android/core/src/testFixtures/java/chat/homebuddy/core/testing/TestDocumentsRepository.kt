@@ -27,6 +27,12 @@ class TestDocumentsRepository : DocumentsRepository {
     val retried = mutableListOf<String>()
     var wiped = false
         private set
+    var wipes = 0
+        private set
+    var whileWiping: suspend () -> Unit = {}
+    var reconciliations = 0
+        private set
+    var whileReconciling: suspend () -> Unit = {}
 
     private val cached = MutableStateFlow<List<DocumentEntity>>(emptyList())
     private val queued = MutableStateFlow<List<UploadEntity>>(emptyList())
@@ -34,6 +40,11 @@ class TestDocumentsRepository : DocumentsRepository {
     override fun documents(householdId: Int): Flow<List<DocumentEntity>> = cached.map { all -> all.filter { it.householdId == householdId } }
 
     override fun uploads(householdId: Int): Flow<List<UploadEntity>> = queued.map { all -> all.filter { it.householdId == householdId } }
+
+    override suspend fun reconcileUploads() {
+        whileReconciling()
+        reconciliations++
+    }
 
     override suspend fun refresh(householdId: Int) {
         failure?.let { throw it }
@@ -63,6 +74,8 @@ class TestDocumentsRepository : DocumentsRepository {
     override suspend fun dismiss(uploadId: String) = queued.update { all -> all.filterNot { it.id == uploadId } }
 
     override suspend fun wipe() {
+        wipes++
+        whileWiping()
         wiped = true
         cached.value = emptyList()
         queued.value = emptyList()

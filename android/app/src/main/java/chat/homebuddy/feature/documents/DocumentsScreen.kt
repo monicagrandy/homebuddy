@@ -133,6 +133,7 @@ private fun UploadRow(upload: UploadItem, actions: DocumentsActions) {
                 UploadStatus.WAITING -> Status(stringResource(R.string.documents_waiting), progress = true)
                 UploadStatus.UPLOADING -> Status(stringResource(R.string.documents_uploading), progress = true)
                 UploadStatus.READING -> Status(stringResource(R.string.documents_reading), progress = true)
+                UploadStatus.FINISHED -> Text(stringResource(R.string.documents_added))
                 UploadStatus.FAILED, UploadStatus.DUPLICATE -> {
                     upload.message?.let {
                         Text(
@@ -143,7 +144,7 @@ private fun UploadRow(upload: UploadItem, actions: DocumentsActions) {
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         upload.openUrl?.let { url -> AssistChip(onClick = { actions.onOpenLink(url) }, label = { Text(stringResource(R.string.documents_open_link)) }) }
-                        if (upload.status == UploadStatus.FAILED && upload.openUrl == null) {
+                        if (upload.canRetry) {
                             AssistChip(onClick = { actions.onRetry(upload) }, label = { Text(stringResource(R.string.action_try_again)) })
                         }
                         AssistChip(onClick = { actions.onDismiss(upload) }, label = { Text(stringResource(R.string.documents_dismiss)) })

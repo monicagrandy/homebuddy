@@ -7,6 +7,7 @@ import chat.homebuddy.core.data.UploadState
 import chat.homebuddy.designsystem.asUiText
 import chat.homebuddy.designsystem.uiText
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -31,6 +32,14 @@ class DocumentsUiStateTest {
 
         assertEquals(uiText(R.string.documents_not_a_pdf_link), item.message)
         assertEquals("https://example.com/support", item.openUrl)
+        assertFalse(item.canRetry)
+    }
+
+    @Test
+    fun `a link that isn't a web page is never offered to open`() {
+        val item = upload(UploadState.FAILED, url = "intent://scan/#Intent;end", errorCode = "not_pdf").toItem()
+
+        assertNull(item.openUrl)
     }
 
     @Test
@@ -39,6 +48,19 @@ class DocumentsUiStateTest {
 
         assertEquals("This PDF has no readable text (it may be a scan).".asUiText(), item.message)
         assertNull(item.openUrl)
+        assertFalse(item.canRetry)
+    }
+
+    @Test
+    fun `only recoverable failures offer retry`() {
+        assertTrue(upload(UploadState.FAILED, url = "https://example.com/manual.pdf", errorCode = "network").toItem().canRetry)
+        assertTrue(upload(UploadState.FAILED, url = "https://example.com/manual.pdf", errorCode = "index_failed").toItem().canRetry)
+        assertTrue(upload(UploadState.FAILED, url = "https://example.com/manual.pdf", errorCode = "download_failed").toItem().canRetry)
+        listOf("not_pdf", "too_large", "empty", "invalid_url", "invalid", "no_text", "deleted", "rejected").forEach { code ->
+            assertFalse(code, upload(UploadState.FAILED, url = "https://example.com/manual.pdf", errorCode = code).toItem().canRetry)
+        }
+        assertFalse(upload(UploadState.FAILED, errorCode = "index_failed").toItem().canRetry)
+        assertFalse(upload(UploadState.INDEXING, url = "https://example.com/manual.pdf").toItem().canRetry)
     }
 
     @Test
@@ -59,6 +81,15 @@ class DocumentsUiStateTest {
         val state = documentsUiState(listOf(document("bosch-manual", status = "indexing")), emptyList(), false, null)
 
         assertTrue(state.documents.single().indexing)
+    }
+
+    @Test
+    fun `a completed upload pending cleanup does not duplicate its saved document`() {
+        val state = documentsUiState(
+            listOf(document("bosch-manual")), listOf(upload(UploadState.COMPLETED, entryId = "bosch-manual")), false, null,
+        )
+        assertEquals(1, state.documents.size)
+        assertTrue(state.uploads.isEmpty())
     }
 
     @Test

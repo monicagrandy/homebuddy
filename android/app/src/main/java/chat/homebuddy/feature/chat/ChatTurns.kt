@@ -7,6 +7,7 @@ import chat.homebuddy.core.network.StreamEvent
 import chat.homebuddy.designsystem.UiText
 import chat.homebuddy.designsystem.asUiText
 import chat.homebuddy.designsystem.uiText
+import java.util.UUID
 
 data class SafetyAlert(val critical: Boolean)
 
@@ -21,17 +22,22 @@ data class ChatTurn(
     val safety: SafetyAlert? = null,
     val error: UiText? = null,
     val note: UiText? = null,
+    val id: String = UUID.randomUUID().toString(),
+    val userMessageId: Int? = null,
+    val assistantMessageId: Int? = null,
 )
 
-/** Urgent hazards (a gas smell, smoke, flooding) get a prominent card with a Call 911 button. */
-fun safetyAlertFor(result: QueryResultDto): SafetyAlert? {
-    val urgency = result.urgencyLevel?.lowercase()
-    if (!result.shouldEscalate && urgency != "high" && urgency != "critical") return null
-    return SafetyAlert(critical = result.shouldEscalate || urgency == "critical")
+fun safetyAlertFor(result: QueryResultDto): SafetyAlert? = safetyAlertFor(result.urgencyLevel, result.shouldEscalate)
+
+/** Urgent hazards (a gas smell, smoke, flooding) get a prominent card with a Call 911 button, live or reopened. */
+fun safetyAlertFor(urgencyLevel: String?, shouldEscalate: Boolean): SafetyAlert? {
+    val urgency = urgencyLevel?.lowercase()
+    if (!shouldEscalate && urgency != "high" && urgency != "critical") return null
+    return SafetyAlert(critical = shouldEscalate || urgency == "critical")
 }
 
 fun ChatTurn.reduce(event: StreamEvent): ChatTurn = when (event) {
-    is StreamEvent.UserAccepted -> this
+    is StreamEvent.UserAccepted -> copy(userMessageId = event.messageId ?: userMessageId)
     is StreamEvent.Status -> if (answer.isEmpty()) copy(status = event.message.withoutLeadingEmoji().asUiText()) else this
     is StreamEvent.Token -> copy(answer = answer + event.text, status = null)
     // The final text replaces what streamed: the output guardrail may have rewritten it.
@@ -41,8 +47,9 @@ fun ChatTurn.reduce(event: StreamEvent): ChatTurn = when (event) {
         streaming = false,
         sources = event.result.sources,
         safety = safetyAlertFor(event.result),
+        assistantMessageId = event.messageId ?: assistantMessageId,
     )
-    is StreamEvent.Error -> copy(status = null, streaming = false, error = event.message.asUiText())
+    is StreamEvent.Error -> copy(status = null, streaming = false, error = event.message.asUiText(), assistantMessageId = event.messageId ?: assistantMessageId)
 }
 
 /** The stream ended. Without a final answer or an error, the connection was cut. */

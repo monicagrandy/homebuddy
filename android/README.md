@@ -63,13 +63,15 @@ UI text lives in `app/src/main/res/values/strings.xml`. ViewModels hand screens 
 
 Unit, contract, integration (MockWebServer) and screenshot (Roborazzi) tests run on the JVM. 
 
-// TODO: add detekt
 ```bash
 ./gradlew :core:testDebugUnitTest :app:testDevDebugUnitTest
 ./gradlew :app:verifyRoborazziDevDebug   # compares against app/src/test/screenshots
 ./gradlew :app:recordRoborazziDevDebug   # after an intended UI change; commit the new images
 ./gradlew lintDevDebug
+./gradlew detekt                         # static analysis
 ```
+
+Detekt uses its default rules plus the project's conventions in `config/detekt/detekt.yml` (long lines up to 180, composables named like classes). What the code reported when detekt was added is listed in each module's `detekt-baseline.xml`, so only new findings fail the build. Fixing one of those removes it from the list; regenerate the lists with `./gradlew detektBaseline` only after doing that, never to hide a new finding.
 
 The manual checklist, for what automated tests can't cover (real sign-in, two phones, QR codes, voice), is in `../docs/android-testing.md`. Releasing to Google Play is in `RELEASE.md`.
 

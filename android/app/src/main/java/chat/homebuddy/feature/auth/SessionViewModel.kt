@@ -14,6 +14,7 @@ import chat.homebuddy.core.domain.SignOutUseCase
 import chat.homebuddy.designsystem.UiText
 import chat.homebuddy.designsystem.uiText
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.IOException
 import javax.inject.Inject
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +22,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -84,6 +87,11 @@ class SessionViewModel @Inject constructor(
 
     init {
         loadProfile()
+        // Session termination can also come from an API rejection or account deletion. Reconcile
+        // any remaining cleanup and surface a retry if that path could not finish it.
+        viewModelScope.launch {
+            session.drop(1).filter { it == SessionState.Loading }.collect { loadProfile() }
+        }
     }
 
     /**
@@ -114,7 +122,13 @@ class SessionViewModel @Inject constructor(
 
     fun onSignOutClick() {
         if (signOutJob?.isActive == true) return
-        signOutJob = viewModelScope.launch { _pendingLogoutUrl.value = signOut() }
+        signOutJob = viewModelScope.launch {
+            try {
+                _pendingLogoutUrl.value = signOut()
+            } catch (_: IOException) {
+                profileError.value = uiText(R.string.sign_out_cleanup_failed)
+            }
+        }
     }
 
     fun onLogoutPageOpened() {
@@ -124,7 +138,11 @@ class SessionViewModel @Inject constructor(
     private fun loadProfile() {
         profileError.value = null
         viewModelScope.launch {
-            if (!refreshProfile()) profileError.value = uiText(R.string.error_offline)
+            if (!refreshProfile()) {
+                profileError.value = uiText(
+                    if (refreshProfile.hasPendingCleanup()) R.string.sign_out_cleanup_failed else R.string.error_offline,
+                )
+            }
         }
     }
 

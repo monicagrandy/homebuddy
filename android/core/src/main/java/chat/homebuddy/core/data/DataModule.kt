@@ -2,6 +2,7 @@ package chat.homebuddy.core.data
 
 import android.content.Context
 import androidx.room.Room
+import chat.homebuddy.core.auth.AccessTokenCache
 import chat.homebuddy.core.data.conversations.CachedConversationsRepository
 import chat.homebuddy.core.data.conversations.ConversationsLocalDataSource
 import chat.homebuddy.core.data.conversations.ConversationsRemoteDataSource
@@ -41,10 +42,8 @@ object DataModule {
     @Provides
     @Singleton
     fun database(@ApplicationContext context: Context): HomeBuddyDatabase =
-        // Only a cache of the server's data, so a schema change can simply start over.
-        Room.databaseBuilder(context, HomeBuddyDatabase::class.java, "homebuddy.db")
-            .fallbackToDestructiveMigration(dropAllTables = true)
-            .build()
+        // Mostly a cache of the server's data, but also the uploads still waiting to be sent, so it's never dropped.
+        Room.databaseBuilder(context, HomeBuddyDatabase::class.java, "homebuddy.db").withHomeBuddyMigrations().build()
 
     @Provides
     @Singleton
@@ -92,8 +91,8 @@ object DataModule {
 
     @Provides
     @Singleton
-    fun profileRepository(remote: ProfileRemoteDataSource, local: ProfileLocalDataSource): ProfileRepository =
-        CachedProfileRepository(remote, local)
+    fun profileRepository(remote: ProfileRemoteDataSource, local: ProfileLocalDataSource, sessions: AccessTokenCache): ProfileRepository =
+        CachedProfileRepository(remote, local, sessions)
 
     @Provides
     @Singleton

@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.detekt)
 }
 
 android {
@@ -40,6 +41,14 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+
+// ./gradlew detekt. Findings the code had when detekt was added are in detekt-baseline.xml; new code must pass.
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(rootProject.file("config/detekt/detekt.yml"))
+    baseline = file("detekt-baseline.xml")
+}
+
 dependencies {
     api(libs.okhttp)
     api(libs.retrofit)
@@ -65,5 +74,6 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.work.testing)
     testImplementation(libs.okhttp.mockwebserver)
 }

@@ -54,12 +54,13 @@ class StreamEventTest {
     fun `the recorded answer stream decodes event by event`() {
         val events = events("query_stream_answer.sse")
 
-        assertEquals(StreamEvent.UserAccepted("How do I clean the dishwasher filter?", false, "thread-2"), events[0])
+        assertEquals(StreamEvent.UserAccepted("How do I clean the dishwasher filter?", false, "thread-2", messageId = 3), events[0])
         assertEquals(StreamEvent.Status("🧭 Routing complete: document_qa_agent"), events[1])
         val final = (events.last() as StreamEvent.Final).result
         assertTrue(final.answer.startsWith("Twist the filter counterclockwise"))
         assertEquals(listOf(SourceDto("bosch-dishwasher-manual", "Bosch Dishwasher Manual", 12, "manual", null)), final.sources)
         assertEquals(false, final.shouldEscalate)
+        assertEquals(4, (events.last() as StreamEvent.Final).messageId)
     }
 
     @Test
@@ -72,7 +73,15 @@ class StreamEventTest {
 
     @Test
     fun `the recorded error stream ends with an error event`() {
-        assertEquals(StreamEvent.Error("Something went wrong while answering. Please try again."), events("query_stream_error.sse").last())
+        val event = events("query_stream_error.sse").last() as StreamEvent.Error
+        assertEquals("Something went wrong while answering. Please try again.", event.message)
+        assertTrue(event.messageId != null)
+    }
+
+    @Test
+    fun `older streams without message IDs and malformed optional IDs remain readable`() {
+        assertEquals(StreamEvent.UserAccepted("q", false, "thread"), parseStreamEvent("""{"type":"user_accepted","sanitized_query":"q","conversation_id":"thread"}"""))
+        assertEquals(StreamEvent.Final(QueryResultDto("Answer")), parseStreamEvent("""{"type":"final","result":{"answer":"Answer"},"message_id":{}}"""))
     }
 
     @Test

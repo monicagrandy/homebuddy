@@ -1,0 +1,21 @@
+# Detekt's default rules (buildUponDefaultConfig), except where this project has a deliberate
+# convention. What the existing code still reports is in each module's detekt-baseline.xml.
+
+naming:
+  FunctionNaming:
+    # Composables are named like classes.
+    ignoreAnnotated: ['Composable']
+  MatchingDeclarationName:
+    # Files are named for what they group, like ChatNavigation.kt: a destination and its graph builder.
+    active: false
+
+style:
+  MaxLineLength:
+    # Compose calls here run long by design; this stops them growing further.
+    maxLineLength: 180
+
+complexity:
+  TooManyFunctions:
+    # A Room DAO is a list of queries and a Hilt module a list of providers.
+    ignoreAnnotated: ['Dao', 'Module']
+    ignorePrivate: true

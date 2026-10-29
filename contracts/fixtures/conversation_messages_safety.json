@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/conversations/thread-3/messages",
+    "query": "household_id=1"
+  },
+  "status": 200,
+  "body": [
+    {
+      "id": 5,
+      "household_id": 1,
+      "session_id": "thread-3",
+      "role": "user",
+      "content": "I smell gas in the kitchen",
+      "created_at": "2026-01-01T00:00:00Z",
+      "sources": [],
+      "urgency_level": null,
+      "should_escalate": false
+    },
+    {
+      "id": 6,
+      "household_id": 1,
+      "session_id": "thread-3",
+      "role": "assistant",
+      "content": "Leave your home now and call 911 or your gas company from outside.",
+      "created_at": "2026-01-01T00:00:00Z",
+      "sources": [],
+      "urgency_level": "critical",
+      "should_escalate": true
+    }
+  ]
+}

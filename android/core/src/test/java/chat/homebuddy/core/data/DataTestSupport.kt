@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import chat.homebuddy.core.data.documents.UploadScheduler
 import chat.homebuddy.core.network.AccessTokenProvider
+import chat.homebuddy.core.network.RequestCredentials
 import chat.homebuddy.core.network.ApiConfig
 import chat.homebuddy.core.network.HomeBuddyApi
 import chat.homebuddy.core.network.buildApi
@@ -15,25 +16,37 @@ import okhttp3.mockwebserver.MockWebServer
 
 class FakeScheduler : UploadScheduler {
     val scheduled = mutableListOf<String>()
+    val ensured = mutableListOf<String>()
     val cancelled = mutableListOf<String>()
     var cancelledAll = false
+    var whileCancellingAll: suspend () -> Unit = {}
+    var whileEnsuring: suspend (String) -> Unit = {}
+    var whileScheduling: (String) -> Unit = {}
 
     override fun schedule(uploadId: String) {
+        whileScheduling(uploadId)
         scheduled += uploadId
+    }
+
+    override suspend fun ensureScheduled(uploadId: String) {
+        whileEnsuring(uploadId)
+        ensured += uploadId
     }
 
     override fun cancel(uploadId: String) {
         cancelled += uploadId
     }
 
-    override fun cancelAll() {
+    override suspend fun cancelAll() {
+        whileCancellingAll()
         cancelledAll = true
     }
 }
 
 private object SignedIn : AccessTokenProvider {
-    override suspend fun accessToken(forceRefresh: Boolean) = "token"
-    override suspend fun onSessionRejected() = Unit
+    override suspend fun credentials() = RequestCredentials("test-session", "token", 0)
+    override suspend fun refresh(rejected: RequestCredentials) = credentials()
+    override suspend fun onSessionRejected(rejected: RequestCredentials) = Unit
 }
 
 fun inMemoryDatabase(): HomeBuddyDatabase =

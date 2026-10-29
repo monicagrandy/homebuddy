@@ -21,7 +21,12 @@ interface DocumentsLocalDataSource {
 
     suspend fun upload(id: String): UploadEntity?
 
+    suspend fun allUploads(): List<UploadEntity>
+
     suspend fun saveUpload(upload: UploadEntity)
+
+    /** Clears a cleaned input only if its attempt still exists in the same terminal state. */
+    suspend fun clearUploadInput(upload: UploadEntity)
 
     suspend fun deleteUpload(id: String)
 
@@ -40,7 +45,13 @@ class RoomDocumentsLocalDataSource(private val documents: DocumentDao, private v
 
     override suspend fun upload(id: String) = uploads.get(id)
 
+    override suspend fun allUploads() = uploads.all()
+
     override suspend fun saveUpload(upload: UploadEntity) = uploads.upsert(upload)
+
+    override suspend fun clearUploadInput(upload: UploadEntity) {
+        upload.filePath?.let { uploads.clearInput(upload.id, upload.attemptId, upload.state, it) }
+    }
 
     override suspend fun deleteUpload(id: String) = uploads.delete(id)
 

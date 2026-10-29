@@ -25,6 +25,8 @@ work = "2.10.0"
 codeScanner = "16.1.0"
 browser = "1.8.0"
 navigation = "2.9.8"
+# 2.0 is the first detekt line that supports AGP 9 and Kotlin 2.2; 1.23 predates both.
+detekt = "2.0.0-alpha.6"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -79,3 +81,4 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 roborazzi = { id = "io.github.takahirom.roborazzi", version.ref = "roborazzi" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }
