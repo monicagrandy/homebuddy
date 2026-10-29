@@ -4,6 +4,7 @@ import queue
 import secrets
 import threading
 from contextlib import asynccontextmanager
+from pathlib import Path
 from datetime import datetime, time, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -13,6 +14,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, 
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import AIMessage, HumanMessage
 from langsmith.run_helpers import tracing_context
 from openai import APIConnectionError, APITimeoutError, RateLimitError
@@ -42,7 +44,7 @@ from backend.ingestion.pipeline import IngestionCancelled
 from backend.middleware import TrustedHostGuard
 from backend.encryption import _load_key as load_document_key
 from backend.migrations import upgrade_database
-from backend.rate_limit import rate_limited
+from backend.rate_limit import demo_rate_limited, rate_limited
 from backend.models import (
     Asset,
     Case,
@@ -68,6 +70,8 @@ from backend.schemas import (
     CaseUpdate,
     CaseOut,
     ConversationMessageOut,
+    DemoMessage,
+    DemoQueryRequest,
     ConversationOut,
     DocumentIndexResponse,
     DocumentJobOut,
@@ -457,7 +461,7 @@ def _load_full_conversation_history(
     ).all()
 
 
-def _to_langchain_messages(history: list[ConversationMessage]):
+def _to_langchain_messages(history: list[ConversationMessage] | list[DemoMessage]):
     messages = []
     for message in history:
         if message.role == "user":
@@ -1217,6 +1221,41 @@ def get_document_job(
     return _job_out(job)
 
 
+def _sse_response(produce) -> StreamingResponse:
+    """Stream the events `produce(emit)` emits as SSE, with keepalive pings."""
+    events: queue.Queue = queue.Queue()
+
+    def run_producer() -> None:
+        try:
+            produce(events.put)
+        except Exception:
+            logger.exception("Streaming query could not save its result")
+            events.put({"type": "error", "message": _UNEXPECTED_QUERY_ERROR_MESSAGE})
+        finally:
+            events.put(_STREAM_DONE)
+
+    # The graph runs in its own thread so a dropped connection (a phone backgrounding the app)
+    # never cuts the answer short; a signed-in client can fetch it from the conversation afterwards.
+    threading.Thread(target=run_producer, name="query-stream", daemon=True).start()
+
+    def event_stream():
+        while True:
+            try:
+                item = events.get(timeout=_SSE_PING_SECONDS)
+            except queue.Empty:
+                yield ": ping\n\n"
+                continue
+            if item is _STREAM_DONE:
+                return
+            yield f"data: {json.dumps(jsonable_encoder({'v': _STREAM_EVENT_VERSION, **item}))}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.post("/query", response_model=QueryResponse, dependencies=[Depends(rate_limited("query"))])
 def query(
     payload: QueryRequest,
@@ -1384,34 +1423,97 @@ def query_stream(
             finally:
                 _finish_conversation_query(persist_session, conversation_pk)
 
-    events: queue.Queue = queue.Queue()
+    return _sse_response(produce)
 
-    def run_producer() -> None:
-        try:
-            produce(events.put)
-        except Exception:
-            logger.exception("Streaming query could not save its result")
-            events.put({"type": "error", "message": _UNEXPECTED_QUERY_ERROR_MESSAGE})
-        finally:
-            events.put(_STREAM_DONE)
 
-    # The graph runs in its own thread so a dropped connection (a phone backgrounding the app)
-    # never cuts the answer short; the client can fetch it from the conversation afterwards.
-    threading.Thread(target=run_producer, name="query-stream", daemon=True).start()
+# Public demo (homebuddy.chat): no sign-in, answers from the demo household's public manuals only.
+# The household is fixed by DEMO_HOUSEHOLD_ID and never taken from the request, and nothing is saved.
+# These routes are for the website, so they stay out of the API contract the apps test against.
 
-    def event_stream():
-        while True:
+def _demo_household(session: Session) -> Household:
+    household = session.get(Household, settings.demo_household_id) if settings.demo_household_id else None
+    if household is None:
+        raise HTTPException(status_code=404, detail="The demo isn't available right now.")
+    return household
+
+
+@app.get("/demo/documents", response_model=list[DocumentOut], include_in_schema=False)
+def demo_documents(session: Session = Depends(get_session)):
+    household = _demo_household(session)
+    documents = session.scalars(
+        select(Document)
+        .where(Document.household_id == household.id, Document.status == "ready")
+        .order_by(Document.id)
+    ).all()
+    return [
+        DocumentOut(
+            id=document.id,
+            entry_id=document.entry_id,
+            display_name=document.source_name,
+            download_url=document.source_url,
+            doc_type=document.doc_type,
+            uploaded_at=document.uploaded_at,
+            status=document.status,
+        )
+        for document in documents
+    ]
+
+
+@app.post("/demo/query/stream", include_in_schema=False, dependencies=[Depends(demo_rate_limited)])
+def demo_query_stream(
+    payload: DemoQueryRequest,
+    service: QueryService = Depends(get_query_service),
+    session: Session = Depends(get_session),
+):
+    household = _demo_household(session)
+    household_id = household.id
+    household_zip_code = household.zip_code
+    if payload.entry_id is not None and session.scalar(
+        select(Document.id).where(Document.household_id == household_id, Document.entry_id == payload.entry_id)
+    ) is None:
+        raise HTTPException(status_code=404, detail="That manual isn't part of the demo.")
+
+    prior_messages = _to_langchain_messages(payload.history)
+    trace_tags = ["homebuddy", "demo", "query:stream"]
+    trace_metadata = {"query_mode": "stream", "household_id": household_id, "entry_id": payload.entry_id}
+
+    def produce(emit) -> None:
+        with SessionLocal() as sources_session, tracing_context(tags=trace_tags, metadata=trace_metadata):
             try:
-                item = events.get(timeout=_SSE_PING_SECONDS)
-            except queue.Empty:
-                yield ": ping\n\n"
-                continue
-            if item is _STREAM_DONE:
-                return
-            yield f"data: {json.dumps(jsonable_encoder({'v': _STREAM_EVENT_VERSION, **item}))}\n\n"
+                for event in service.stream_query(
+                    user_query=payload.question,
+                    user_id=None,
+                    session_id=f"demo-{uuid.uuid4()}",
+                    entry_id=payload.entry_id,
+                    household_id=household_id,
+                    household_zip_code=household_zip_code,
+                    messages=prior_messages,
+                ):
+                    if event.get("type") == "final":
+                        event = {
+                            **event,
+                            "result": {
+                                **event["result"],
+                                "sources": _resolve_sources(
+                                    sources_session,
+                                    household_id=household_id,
+                                    raw_sources=event["result"].get("sources", []),
+                                ),
+                            },
+                        }
+                    emit(event)
+            except (ValueError, SafetyBlockError, QueryEngineError) as exc:
+                emit({"type": "error", "message": _streaming_query_error_message(exc)})
+            except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
+                logger.warning("Demo query hit temporary AI provider error: %s", exc)
+                emit({"type": "error", "message": _streaming_query_error_message(exc)})
+            except Exception:
+                logger.exception("Demo query failed")
+                emit({"type": "error", "message": _UNEXPECTED_QUERY_ERROR_MESSAGE})
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return _sse_response(produce)
+
+
+if settings.environment == "development":
+    # Caddy serves deploy/site in production; locally the demo page is at http://localhost:8000/site/.
+    app.mount("/site", StaticFiles(directory=Path(__file__).resolve().parent.parent / "deploy" / "site", html=True))

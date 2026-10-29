@@ -9,19 +9,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Home Buddy Terms of Use</title>
-  <style>
-    :root { color-scheme: light dark; --text: #1f2933; --muted: #52606d; --bg: #fbfaf7; --rule: #e4e0d8; }
-    @media (prefers-color-scheme: dark) { :root { --text: #e6e2da; --muted: #a8a29a; --bg: #1c1b19; --rule: #36332f; } }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
-    main { max-width: 42rem; margin: 0 auto; padding: 2.5rem 1rem 4rem; }
-    h1 { font-size: 1.9rem; margin-bottom: 0.25rem; }
-    h2 { font-size: 1.2rem; margin-top: 2rem; border-top: 1px solid var(--rule); padding-top: 1.25rem; }
-    .meta { color: var(--muted); }
-    .callout { border-left: 4px solid #c2410c; padding: 0.5rem 1rem; }
-  </style>
+  <link rel="stylesheet" href="site.css">
 </head>
 <body>
-<main>
+<header class="masthead">
+  <a class="brand" href="./" aria-label="Home Buddy home">
+    <span class="mark" aria-hidden="true">
+      <i></i><span class="r1"></span><span class="r1"></span><i></i>
+      <span class="r2"></span><span class="r2"></span><span class="r2"></span><span class="r2"></span>
+      <span></span><span class="win"></span><span class="win"></span><span></span>
+      <span></span><span class="door"></span><span class="door"></span><span></span>
+    </span>
+    Home Buddy
+  </a>
+  <span class="sticker">Mobile app coming soon</span>
+</header>
+<main class="page">
   <h1>Terms of Use</h1>
   <p class="meta">Home Buddy · Effective October 2026</p>
 
@@ -54,5 +57,16 @@
   <h2>Contact</h2>
   <p>Questions about these terms: [add a contact email address before publishing].</p>
 </main>
+<footer class="site-footer">
+  <div class="inner">
+    <nav aria-label="Legal">
+      <a href="./">Try the demo</a>
+      <a href="privacy">Privacy</a>
+      <a href="terms">Terms</a>
+      <a href="delete-account">Delete account</a>
+    </nav>
+    <p>Home Buddy · The mobile app is coming soon.</p>
+  </div>
+</footer>
 </body>
 </html>

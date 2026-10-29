@@ -14,8 +14,8 @@ Why this path:
 
 - 1 Lightsail Linux instance
 - Docker Compose running:
-  - `frontend` for Streamlit
   - `backend` for FastAPI
+  - `frontend` for Streamlit, which is switched off: it only starts with `--profile web-app` (see "The public demo" below)
   - `db` using PostgreSQL with `pgvector`
   - `caddy` as the reverse proxy
 - 1 static IP
@@ -165,14 +165,22 @@ Because HomeBuddy requires Cognito sign-in, set up the domain before your first 
 2. Point an `A` record at the Lightsail static IP.
 3. Update [`deploy/Caddyfile`](../deploy/Caddyfile) so the site label is your real domain instead of `:80`.
 
-Example:
+The `homebuddy.chat` block serves the public demo: the static pages in `deploy/site` and the backend's `/demo` routes. See "The public demo" below.
 
-```caddyfile
-homebuddy.yourdomain.com {
-    encode gzip zstd
-    reverse_proxy frontend:8501
-}
-```
+### The public demo
+
+homebuddy.chat is a demo page with no sign-in. Visitors ask the real agent about a few public appliance manuals and see the mobile app is coming soon. The signed-in Streamlit app is switched off but kept in the repo.
+
+1. Caddy serves `deploy/site/index.html` at `/` and forwards `/demo/*` to the backend, unbuffered and uncompressed so answers stream. The backend allows the `homebuddy.chat` host for this, and `FORWARDED_ALLOW_IPS=*` gives it the visitor's IP from Caddy.
+2. Index the manuals into a demo household. It has no members, so only the `/demo` routes can read it:
+
+   ```bash
+   docker compose -f docker-compose.aws.yml exec backend python scripts/load_demo_documents.py --create-household --apply
+   ```
+
+   Put the id it prints in `.env` as `DEMO_HOUSEHOLD_ID`, then restart the backend with `docker compose -f docker-compose.aws.yml up -d backend`. Later runs of `python scripts/load_demo_documents.py --apply` only add manuals that are missing.
+3. Visitors get 3 questions a minute and 20 a day, and the whole demo stops at 300 a day (UTC). Change them with `DEMO_QUERIES_PER_MINUTE`, `DEMO_QUERIES_PER_VISITOR_PER_DAY` and `DEMO_QUERIES_PER_DAY`. The counts live in memory, so a restart resets them.
+4. To bring back the signed-in web app, start it with `docker compose -f docker-compose.aws.yml --profile web-app up -d` and switch the Caddyfile's catch-all back to `reverse_proxy frontend:8501` (the comment at the end of the `homebuddy.chat` block shows how).
 
 ### API subdomain for the mobile apps
 
@@ -182,7 +190,7 @@ The native apps call the backend directly at `api.homebuddy.chat`. The backend s
 2. The `api.homebuddy.chat` block in the Caddyfile:
    - limits request bodies (60 MB for `/documents*`, 256 KB otherwise)
    - streams answers without buffering
-3. `docker-compose.aws.yml` runs the backend with `ENVIRONMENT=production` (hides `/docs` and `/openapi.json`) and `ALLOWED_HOSTS=api.homebuddy.chat,backend`. Override `ALLOWED_HOSTS` in `.env` if your domain differs.
+3. `docker-compose.aws.yml` runs the backend with `ENVIRONMENT=production` (hides `/docs` and `/openapi.json`) and `ALLOWED_HOSTS=api.homebuddy.chat,homebuddy.chat,backend`. Override `ALLOWED_HOSTS` in `.env` if your domain differs.
 4. Per-user limits default to 10 questions and 10 document uploads per minute. Change them with `RATE_LIMIT_QUERIES_PER_MINUTE` and `RATE_LIMIT_DOCUMENTS_PER_MINUTE`.
 
 Check the Caddyfile before restarting Caddy:
@@ -256,7 +264,7 @@ Google Play requires apps to let people delete their account both in the app and
 
 1. In IAM, create a user (or access key) whose only permission is `cognito-idp:AdminDeleteUser` on your user pool's ARN.
 2. Add its key to the server's `.env` as `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. `COGNITO_USER_POOL_ID` and `COGNITO_REGION` must be set too.
-3. The web link for the Play Console's Data safety form is `https://homebuddy.chat/?page=delete-account`. After sign-in it opens My Profile, where "Delete account…" lives.
+3. The web link for the Play Console's Data safety form is `https://homebuddy.chat/delete-account`. It explains how to delete the account in the app, or by email without it. The old `/?page=delete-account` link redirects there.
 
 Without the key, the data is still deleted but the Cognito sign-in remains, and the backend logs a warning.
 
@@ -274,7 +282,7 @@ Do these before publishing the apps:
 
    Back the key up with your other secrets. Without it, stored files can't be read back; search keeps working because it uses the extracted text.
 2. **Decide what LangSmith sees.** It records full questions and answers by default. To keep monitoring without storing content, add `LANGSMITH_HIDE_INPUTS=true` and `LANGSMITH_HIDE_OUTPUTS=true` to `.env`, or turn tracing off with `LANGCHAIN_TRACING_V2=false`. Update the Privacy Policy to match.
-3. **Review the policy pages.** `deploy/site/privacy.html` and `deploy/site/terms.html` are served at `/privacy` and `/terms`. Fill in the contact address and check they still describe what Home Buddy does.
+3. **Review the policy pages.** `deploy/site/privacy.html`, `deploy/site/terms.html` and `deploy/site/delete-account.html` are served at `/privacy`, `/terms` and `/delete-account`. Fill in the contact address and check they still describe what Home Buddy does.
 
 ## Step 6: Start HomeBuddy
 
@@ -290,7 +298,7 @@ Useful follow-up commands:
 docker compose -f docker-compose.aws.yml ps
 docker compose -f docker-compose.aws.yml logs -f
 docker compose -f docker-compose.aws.yml logs -f backend
-docker compose -f docker-compose.aws.yml logs -f frontend
+docker compose -f docker-compose.aws.yml logs -f caddy
 ```
 
 ## Step 7: Smoke test the deployment
@@ -301,13 +309,13 @@ Visit:
 https://YOUR_DOMAIN
 ```
 
-You should see the Streamlit UI through Caddy.
+You should see the demo page with the manuals on its shelf, and a question should stream an answer. `https://YOUR_DOMAIN/demo/documents` should list the manuals.
 
 If something fails:
 
 1. Check `docker compose ... ps`
 2. Check backend logs
-3. Check frontend logs
+3. Check Caddy logs
 4. Check the database container logs
 
 If you updated DNS or Cognito values after the first launch, restart:

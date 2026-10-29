@@ -5,9 +5,12 @@ workflow. It answers grounded questions from uploaded documents, routes hazardou
 queries to a safety flow, drafts follow-up cases and tasks, and can suggest local
 contractors through SerpAPI's Yelp Search API.
 
+homebuddy.chat is now a **public demo**: visitors ask the agent about a few public appliance manuals without signing in, and the page says the mobile app is coming soon. The signed-in Streamlit web app (`app.py`) is switched off but kept; see "Web demo" below.
+
 ## Current stack
 
-- `Streamlit` frontend
+- Static demo page (`deploy/site`) for the website; native Android app in `android/`
+- `Streamlit` frontend (signed-in web app, switched off)
 - `FastAPI` backend
 - `LangGraph` orchestration
 - `OpenAI` models + embeddings
@@ -106,6 +109,21 @@ The app should come up at:
 
 - Streamlit UI: `http://localhost:8501`
 - FastAPI backend: `http://localhost:8000`
+
+## Web demo
+
+The website is `deploy/site/index.html`, a static page that calls two public backend routes: `GET /demo/documents` and `POST /demo/query/stream`. They answer only from the demo household's manuals, need no sign-in, save nothing, and are limited per visitor IP and per day (`DEMO_*` in `.env.example`). They're left out of the API contract the apps test against.
+
+To try it locally:
+
+```bash
+python scripts/load_demo_documents.py --create-household --apply   # prints the household id
+# add DEMO_HOUSEHOLD_ID=<id> to .env, then restart uvicorn
+```
+
+With `ENVIRONMENT=development` the backend serves the pages itself at `http://localhost:8000/site/`. In production, Caddy serves them (`deploy/Caddyfile`).
+
+To bring back the signed-in Streamlit app on the server, start it with `docker compose -f docker-compose.aws.yml --profile web-app up -d` and point the Caddyfile's catch-all back at `frontend:8501`. Locally, `streamlit run app.py` still works as before.
 
 ## Local verification checklist
 

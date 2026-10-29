@@ -10,14 +10,16 @@ from sqlalchemy.orm import sessionmaker
 from backend import api
 from backend.auth import AuthenticatedIdentity
 from backend.db import Base
-from backend.rate_limit import limiter
+from backend.rate_limit import demo_quota, limiter
 
 
 @pytest.fixture(autouse=True)
 def reset_rate_limiter() -> Generator[None, None, None]:
     limiter.reset()
+    demo_quota.reset()
     yield
     limiter.reset()
+    demo_quota.reset()
 
 
 @pytest.fixture(autouse=True)

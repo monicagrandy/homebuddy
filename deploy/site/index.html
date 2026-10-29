@@ -1,0 +1,860 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Home Buddy demo</title>
+  <meta name="description" content="Ask Home Buddy about real appliance manuals. No sign-in needed. The Home Buddy mobile app is coming soon.">
+  <link rel="preload" href="fonts/bricolage-grotesque-latin-standard-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="site.css">
+  <style>
+    /* ---------- Coming-soon ribbon ---------- */
+    .ribbon {
+      overflow: hidden;
+      border-block: var(--border);
+      background: repeating-linear-gradient(90deg, var(--gold) 0 64px, var(--aqua) 64px 128px, var(--sky) 128px 192px);
+      color: var(--ink-fixed);
+      transform: rotate(-1deg);
+      margin: 0.5rem -1rem 0;
+    }
+    .ribbon-track {
+      display: flex;
+      width: max-content;
+      animation: marquee 38s linear infinite;
+    }
+    .ribbon-track span {
+      padding: 0.55rem 1.25rem;
+      font: 700 var(--step--1)/1.2 var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+      background: color-mix(in srgb, var(--paper) 0%, transparent);
+    }
+    .ribbon-track span b { padding: 0.1rem 0.35rem; background: var(--lime); border: 2px solid var(--ink-fixed); border-radius: 6px; }
+    @keyframes marquee { to { transform: translateX(-50%); } }
+
+    /* ---------- Hero ---------- */
+    .hero {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      align-items: center;
+      gap: 2rem;
+      max-width: 72rem;
+      margin: 0 auto;
+      padding: 3.5rem 1rem 2.5rem;
+      background: repeating-conic-gradient(var(--checker) 0 25%, transparent 0 50%) 0 0 / 48px 48px;
+      background-clip: content-box;
+    }
+    .hero-copy { grid-column: 1 / span 5; }
+    .hero h1 {
+      margin: 0;
+      font: 800 var(--step-4)/0.95 var(--font-display);
+      font-stretch: 80%;
+      letter-spacing: -0.035em;
+    }
+    .hero h1 em {
+      font-style: normal;
+      padding: 0 0.15em;
+      background: var(--lime);
+      color: var(--ink-fixed);
+      border: var(--border);
+      border-radius: 10px;
+      box-shadow: 4px 4px 0 var(--shadow);
+      display: inline-block;
+      transform: rotate(-2deg);
+    }
+    .hero p.lede {
+      max-width: 34rem;
+      margin: 1.4rem 0 1.6rem;
+      font-size: var(--step-1);
+      line-height: 1.45;
+    }
+    .hero p.lede strong { background: linear-gradient(transparent 60%, color-mix(in srgb, var(--aqua) 55%, transparent) 60%); }
+    .hero-actions { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; }
+    .hero-actions .note { font: 400 var(--step--1)/1.3 var(--font-mono); color: var(--muted); }
+
+    /* The house: a mirrored tile pyramid for a roof over a block of wall tiles. */
+    .house {
+      grid-column: 6 / span 3;
+      justify-self: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      --t: clamp(16px, 2.6vw, 26px);
+      filter: drop-shadow(6px 6px 0 var(--shadow));
+    }
+    .house .row { display: flex; gap: 4px; }
+    .house .tile {
+      width: var(--t);
+      height: var(--t);
+      border: 2px solid var(--ink-fixed);
+      border-radius: 4px;
+      animation: settle 600ms cubic-bezier(.2,.9,.3,1.4) backwards;
+    }
+    .house .wall { margin-top: 2px; display: grid; grid-template-columns: repeat(6, var(--t)); gap: 4px; }
+    /* Transform only, so the house is still drawn wherever the animation doesn't run. */
+    @keyframes settle { from { transform: translateY(-14px) rotate(90deg); } }
+
+    /* ---------- Workbench: shelf + chat ---------- */
+    .workbench {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      gap: 2rem;
+      max-width: 72rem;
+      margin: 0 auto;
+      padding: 0 1rem;
+      align-items: start;
+    }
+    .shelf { grid-column: 1 / span 3; }
+    .chat { grid-column: 4 / span 5; }
+
+    .section-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      margin: 0 0 0.35rem;
+      font: 800 var(--step-2)/1.1 var(--font-display);
+      font-stretch: 85%;
+    }
+    .section-hint { margin: 0 0 1rem; color: var(--muted); font-size: var(--step--1); }
+
+    .tiles { display: grid; gap: 1rem; margin: 0; padding: 0; list-style: none; }
+    .doc {
+      position: relative;
+      display: grid;
+      grid-template-columns: 2.1rem 1fr;
+      border: var(--border);
+      border-radius: var(--radius);
+      background: var(--tile, var(--peri));
+      color: var(--ink-fixed);
+      box-shadow: var(--hard-shadow);
+      transition: transform 140ms ease, box-shadow 140ms ease;
+    }
+    .doc:has(.pick[aria-pressed="true"]) { transform: translate(var(--lift), var(--lift)); box-shadow: 0 0 0 var(--shadow); }
+    .doc .kind {
+      display: grid;
+      place-items: center;
+      border-right: var(--border);
+      border-color: var(--ink-fixed);
+      font: 700 0.7rem/1 var(--font-mono);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+    }
+    .doc .body { padding: 0.8rem 0.9rem 0.85rem; min-width: 0; }
+    .doc .pick {
+      display: block;
+      width: 100%;
+      padding: 0;
+      border: 0;
+      background: none;
+      color: inherit;
+      text-align: left;
+      font: 750 var(--step-0)/1.25 var(--font-body);
+      cursor: pointer;
+    }
+    .doc .pick::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+    .doc .pick:focus-visible { outline: none; }
+    .doc:has(.pick:focus-visible) { outline: 3px solid var(--focus); outline-offset: 4px; }
+    .doc .sub { display: flex; flex-wrap: wrap; gap: 0.25rem 0.9rem; margin-top: 0.4rem; font: 400 0.78rem/1.4 var(--font-mono); }
+    .doc .sub a { position: relative; z-index: 1; font-weight: 700; }
+    .doc .state { opacity: 0; }
+    .doc:has(.pick[aria-pressed="true"]) .state { opacity: 1; }
+    .shelf-status { font: 400 var(--step--1)/1.5 var(--font-mono); color: var(--muted); }
+
+    .chat-card {
+      border: var(--border);
+      border-radius: calc(var(--radius) + 6px);
+      background: var(--surface);
+      box-shadow: 8px 8px 0 var(--shadow);
+      overflow: hidden;
+    }
+    .chat-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.9rem 1.1rem;
+      border-bottom: var(--border);
+      background: var(--peri);
+      color: var(--ink-fixed);
+    }
+    .chat-head h2 { margin: 0; font: 800 var(--step-1)/1.1 var(--font-display); }
+    .chat-head .scope { font: 400 0.78rem/1.3 var(--font-mono); }
+    .chat-head .button { padding: 0.4rem 0.75rem; font-size: var(--step--1); box-shadow: 3px 3px 0 var(--ink-fixed); border-color: var(--ink-fixed); background: var(--paper); color: var(--ink); }
+
+    .thread {
+      display: flex;
+      flex-direction: column;
+      gap: 1.1rem;
+      min-height: 18rem;
+      max-height: min(36rem, 62vh);
+      overflow-y: auto;
+      padding: 1.25rem 1.1rem;
+    }
+    .empty { margin: auto 0; }
+    .empty p { margin: 0 0 0.9rem; font-weight: 600; }
+    .chips { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+    .chip {
+      padding: 0.5rem 0.8rem;
+      border: 2px solid var(--ink-fixed);
+      border-radius: 10px;
+      background: var(--chip, var(--peri));
+      color: var(--ink-fixed);
+      box-shadow: 3px 3px 0 var(--shadow);
+      font: 600 var(--step--1)/1.3 var(--font-body);
+      text-align: left;
+      cursor: pointer;
+      transition: transform 140ms ease;
+    }
+    .chip:nth-child(odd):hover { transform: rotate(-2deg) translateY(-2px); }
+    .chip:nth-child(even):hover { transform: rotate(2deg) translateY(-2px); }
+
+    .msg { max-width: 92%; }
+    .msg.you {
+      align-self: flex-end;
+      padding: 0.7rem 0.95rem;
+      border: 2px solid var(--ink-fixed);
+      border-radius: 14px 14px 4px 14px;
+      background: var(--peri);
+      color: var(--ink-fixed);
+      box-shadow: 3px 3px 0 var(--shadow);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .msg.buddy {
+      align-self: flex-start;
+      position: relative;
+      padding: 0.85rem 1rem 0.85rem 1.2rem;
+      border: 2px solid var(--line);
+      border-radius: 14px 14px 14px 4px;
+      background: var(--paper);
+      overflow-wrap: anywhere;
+    }
+    .msg.buddy::before {
+      content: "";
+      position: absolute;
+      left: -2px; top: -2px; bottom: -2px;
+      width: 9px;
+      border-radius: 14px 0 0 4px;
+      background: var(--aqua);
+      border: 2px solid var(--line);
+    }
+    .msg.buddy .answer > :first-child { margin-top: 0; }
+    .msg.buddy .answer > :last-child { margin-bottom: 0; }
+    .msg.buddy .answer p, .msg.buddy .answer ul, .msg.buddy .answer ol { margin: 0 0 0.65rem; }
+    .msg.buddy .answer ul, .msg.buddy .answer ol { padding-left: 1.25rem; }
+    .msg.buddy .answer code { font: 0.9em var(--font-mono); }
+    .msg.buddy.failed { border-style: dashed; }
+    .msg.buddy.failed::before { background: var(--gold); }
+
+    .safety { border-color: var(--line); padding-top: 0; overflow: hidden; }
+    .safety .band {
+      margin: 0 -1rem 0.75rem -1.2rem;
+      padding: 0.4rem 1.2rem;
+      border-bottom: 2px solid var(--line);
+      background: repeating-linear-gradient(-45deg, var(--gold) 0 14px, var(--ink-fixed) 14px 28px);
+    }
+    .safety .band span {
+      padding: 0.15rem 0.5rem;
+      background: var(--gold);
+      color: var(--ink-fixed);
+      border: 2px solid var(--ink-fixed);
+      border-radius: 6px;
+      font: 700 0.78rem/1 var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .safety::before { display: none; }
+
+    .sources { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
+    .sources .label { width: 100%; font: 700 0.7rem/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+    .source {
+      padding: 0.2rem 0.5rem;
+      border: 2px solid var(--ink-fixed);
+      border-radius: 6px;
+      background: var(--aqua);
+      color: var(--ink-fixed);
+      font: 400 0.75rem/1.3 var(--font-mono);
+      text-decoration: none;
+    }
+    a.source:hover { background: var(--lime); }
+
+    /* Progress: eight tiles that flip as each step finishes. */
+    .working { display: grid; gap: 0.5rem; }
+    .flips { display: flex; gap: 5px; }
+    .flips span {
+      width: 16px; height: 16px;
+      border: 2px solid var(--line);
+      border-radius: 3px;
+      background: var(--surface);
+      transition: transform 380ms ease, background-color 380ms ease;
+    }
+    .flips span.on { transform: rotateY(180deg) rotate(90deg); }
+    .flips span.on:nth-child(6n+1) { background: var(--pink); }
+    .flips span.on:nth-child(6n+2) { background: var(--gold); }
+    .flips span.on:nth-child(6n+3) { background: var(--aqua); }
+    .flips span.on:nth-child(6n+4) { background: var(--sky); }
+    .flips span.on:nth-child(6n+5) { background: var(--lime); }
+    .flips span.on:nth-child(6n+6) { background: var(--peri); }
+    .flips.idle span:first-child { animation: nudge 900ms ease-in-out infinite alternate; }
+    @keyframes nudge { to { transform: rotate(90deg); background: var(--lime); } }
+    .working .step { font: 400 0.78rem/1.3 var(--font-mono); color: var(--muted); }
+
+    .composer {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-end;
+      padding: 0.9rem 1.1rem 1.1rem;
+      border-top: var(--border);
+    }
+    .composer textarea {
+      flex: 1;
+      min-width: 0;
+      min-height: 3rem;
+      max-height: 9rem;
+      padding: 0.7rem 0.85rem;
+      border: var(--border);
+      border-radius: var(--radius);
+      background: var(--paper);
+      color: var(--ink);
+      font: 400 var(--step-0)/1.4 var(--font-body);
+      resize: none;
+    }
+    .composer textarea::placeholder { color: var(--muted); }
+    .disclaimer { margin: 0.9rem 0 0; color: var(--muted); font-size: var(--step--1); }
+
+    /* ---------- App promo ---------- */
+    .promo {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 1.5rem;
+      align-items: center;
+      max-width: 72rem;
+      margin: 4rem auto 0;
+      padding: 0 1rem;
+    }
+    .promo .phone {
+      width: 7.5rem;
+      aspect-ratio: 9 / 17;
+      border: var(--border);
+      border-radius: 22px;
+      background: var(--ink-fixed);
+      padding: 10px 8px;
+      box-shadow: var(--hard-shadow);
+      transform: rotate(-6deg);
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      align-content: start;
+      gap: 5px;
+    }
+    .promo .phone span { aspect-ratio: 1; border-radius: 5px; }
+    .promo h2 { margin: 0 0 0.4rem; font: 800 var(--step-3)/1 var(--font-display); font-stretch: 82%; letter-spacing: -0.02em; }
+    .promo p { margin: 0; max-width: 38rem; font-size: var(--step-1); line-height: 1.45; }
+
+    @media (max-width: 860px) {
+      .hero, .workbench { grid-template-columns: 1fr; }
+      .hero-copy, .house, .shelf, .chat { grid-column: 1; }
+      .hero { padding-top: 2rem; gap: 2.25rem; }
+      .house { order: -1; --t: 15px; }
+      .tiles { grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+    }
+    @media (max-width: 520px) {
+      .masthead { flex-wrap: wrap; }
+      .promo { grid-template-columns: 1fr; justify-items: start; }
+      .promo .phone { width: 5.5rem; }
+      .composer { flex-direction: column; align-items: stretch; }
+      .msg { max-width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .ribbon-track { transform: none; }
+      .hero h1 em { transform: none; }
+      .promo .phone { transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="masthead">
+    <a class="brand" href="./" aria-label="Home Buddy home">
+      <span class="mark" aria-hidden="true">
+        <i></i><span class="r1"></span><span class="r1"></span><i></i>
+        <span class="r2"></span><span class="r2"></span><span class="r2"></span><span class="r2"></span>
+        <span></span><span class="win"></span><span class="win"></span><span></span>
+        <span></span><span class="door"></span><span class="door"></span><span></span>
+      </span>
+      Home Buddy
+    </a>
+    <span class="sticker">Mobile app coming soon</span>
+  </header>
+
+  <div class="ribbon" aria-hidden="true">
+    <div class="ribbon-track">
+      <span>The Home Buddy <b>mobile app</b> is coming soon ✦</span>
+      <span>Keep your own manuals, warranties &amp; receipts in one place ✦</span>
+      <span>Ask about them from anywhere ✦</span>
+      <span>The Home Buddy <b>mobile app</b> is coming soon ✦</span>
+      <span>Keep your own manuals, warranties &amp; receipts in one place ✦</span>
+      <span>Ask about them from anywhere ✦</span>
+    </div>
+  </div>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">Your home's manuals, <em>finally</em> talking back.</h1>
+        <p class="lede">Home Buddy reads the fine print so you don't have to. Try it on a few <strong>real appliance manuals</strong>: no sign-in, no setup.</p>
+        <div class="hero-actions">
+          <a class="button" href="#ask">Ask a question ↓</a>
+          <span class="note">The mobile app is coming soon.</span>
+        </div>
+      </div>
+      <div class="house" id="house" aria-hidden="true"></div>
+    </section>
+
+    <div class="workbench" id="ask">
+      <section class="shelf" aria-labelledby="shelf-title">
+        <h2 class="section-title" id="shelf-title">The shelf</h2>
+        <p class="section-hint">Tap a manual to ask about just that one. Every PDF opens from the manufacturer's site.</p>
+        <ul class="tiles" id="tiles"></ul>
+        <p class="shelf-status" id="shelf-status">Loading the manuals…</p>
+      </section>
+
+      <section class="chat" aria-labelledby="chat-title">
+        <div class="chat-card">
+          <div class="chat-head">
+            <div>
+              <h2 id="chat-title">Ask Home Buddy</h2>
+              <div class="scope" id="scope">Asking about all manuals</div>
+            </div>
+            <button class="button quiet" type="button" id="reset" hidden>Start over</button>
+          </div>
+          <div class="thread" id="thread" aria-live="polite">
+            <div class="empty" id="empty">
+              <p>Not sure where to start? Try one of these:</p>
+              <div class="chips" id="chips"></div>
+            </div>
+          </div>
+          <form class="composer" id="composer">
+            <label class="visually-hidden" for="question">Your question</label>
+            <textarea id="question" rows="1" maxlength="1000" placeholder="Ask about a manual, a warranty, a weird noise…" required></textarea>
+            <button class="button" type="submit" id="send">Ask</button>
+          </form>
+        </div>
+        <p class="disclaimer">Answers come only from the manuals on the shelf and aren't professional advice. If something seems unsafe, stop and call a pro.</p>
+      </section>
+    </div>
+
+    <section class="promo" aria-labelledby="promo-title">
+      <div class="phone" id="phone" aria-hidden="true"></div>
+      <div>
+        <h2 id="promo-title">Your whole home, in your pocket. Soon.</h2>
+        <p>The Home Buddy mobile app is coming soon. Snap or scan the manuals, warranties and receipts for your own home, then ask about them whenever something breaks, beeps or leaks.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="inner">
+      <nav aria-label="Legal">
+        <a href="privacy">Privacy</a>
+        <a href="terms">Terms</a>
+        <a href="delete-account">Delete account</a>
+      </nav>
+      <p>Manuals © their manufacturers, linked from their sites.</p>
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const PALETTE = ["--pink", "--gold", "--aqua", "--sky", "--lime", "--peri"];
+      const SUGGESTIONS = [
+        "My dishwasher isn't draining. What should I check?",
+        "How do I clean the dishwasher filter?",
+        "My water heater's pilot keeps going out. What do I do?",
+        "What does the water heater warranty cover?",
+        "I smell gas near my water heater.",
+      ];
+      const MAX_HISTORY = 4;
+      const PROGRESS_TILES = 8;
+      const tint = (name) => `var(${name})`;
+
+      const $ = (id) => document.getElementById(id);
+      const thread = $("thread");
+      const form = $("composer");
+      const input = $("question");
+      const send = $("send");
+      const reset = $("reset");
+      const scope = $("scope");
+
+      let documents = [];
+      let selected = null; // entry_id, or null for all manuals
+      let history = [];
+      let busy = false;
+
+      // ---------- Decorations: the tile house and the phone ----------
+
+      function buildHouse() {
+        const house = $("house");
+        // Roof: rows of 1 to 8 tiles, coloured by distance from the centre so it mirrors.
+        for (let row = 1; row <= 8; row++) {
+          const line = document.createElement("div");
+          line.className = "row";
+          for (let i = 0; i < row; i++) {
+            const tile = document.createElement("span");
+            tile.className = "tile";
+            const fromCentre = Math.abs(i - (row - 1) / 2);
+            tile.style.background = tint(PALETTE[Math.round(fromCentre + row) % PALETTE.length]);
+            tile.style.animationDelay = `${(row * 8 + i) * 12}ms`;
+            line.append(tile);
+          }
+          house.append(line);
+        }
+        const wall = document.createElement("div");
+        wall.className = "wall";
+        const windows = new Set([7, 10, 13, 16]);
+        const door = new Set([20, 21]);
+        for (let i = 0; i < 24; i++) {
+          const tile = document.createElement("span");
+          tile.className = "tile";
+          tile.style.background = door.has(i) ? "var(--gold)" : windows.has(i) ? "var(--lime)" : "var(--peri)";
+          tile.style.animationDelay = `${(36 + i) * 12}ms`;
+          wall.append(tile);
+        }
+        house.append(wall);
+
+        const phone = $("phone");
+        for (let i = 0; i < 9; i++) {
+          const tile = document.createElement("span");
+          tile.style.background = tint(PALETTE[i % PALETTE.length]);
+          phone.append(tile);
+        }
+      }
+
+      // ---------- Safe rendering of answers ----------
+
+      function escapeHtml(text) {
+        return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+      }
+
+      function inline(text) {
+        // Runs on escaped text only, so the model can never inject markup.
+        return text
+          .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+          .replace(/`([^`]+)`/g, "<code>$1</code>");
+      }
+
+      function renderAnswer(markdown) {
+        const blocks = escapeHtml(markdown.trim()).split(/\n{2,}/);
+        const html = [];
+        for (const block of blocks) {
+          const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+          if (!lines.length) continue;
+          if (lines.every((l) => /^[-*•]\s+/.test(l))) {
+            html.push("<ul>" + lines.map((l) => `<li>${inline(l.replace(/^[-*•]\s+/, ""))}</li>`).join("") + "</ul>");
+          } else if (lines.every((l) => /^\d+[.)]\s+/.test(l))) {
+            html.push("<ol>" + lines.map((l) => `<li>${inline(l.replace(/^\d+[.)]\s+/, ""))}</li>`).join("") + "</ol>");
+          } else {
+            html.push(`<p>${lines.map((l) => inline(l.replace(/^#{1,6}\s+/, ""))).join("<br>")}</p>`);
+          }
+        }
+        return html.join("");
+      }
+
+      function safeUrl(url) {
+        try {
+          const parsed = new URL(url);
+          return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : null;
+        } catch {
+          return null;
+        }
+      }
+
+      // ---------- The shelf ----------
+
+      function renderShelf() {
+        const tiles = $("tiles");
+        tiles.replaceChildren();
+        documents.forEach((doc, index) => {
+          const item = document.createElement("li");
+          item.className = "doc";
+          item.style.setProperty("--tile", tint(PALETTE[(index * 2) % PALETTE.length]));
+
+          const kind = document.createElement("span");
+          kind.className = "kind";
+          kind.textContent = doc.doc_type === "warranty" ? "Warranty" : "Manual";
+
+          const body = document.createElement("div");
+          body.className = "body";
+          const pick = document.createElement("button");
+          pick.type = "button";
+          pick.className = "pick";
+          pick.textContent = doc.display_name;
+          pick.setAttribute("aria-pressed", String(selected === doc.entry_id));
+          pick.addEventListener("click", () => choose(selected === doc.entry_id ? null : doc.entry_id));
+
+          const sub = document.createElement("div");
+          sub.className = "sub";
+          const href = doc.download_url && safeUrl(doc.download_url);
+          if (href) {
+            const link = document.createElement("a");
+            link.href = href;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = "Open PDF ↗";
+            sub.append(link);
+          }
+          const state = document.createElement("span");
+          state.className = "state";
+          state.textContent = "✦ asking this one";
+          sub.append(state);
+
+          body.append(pick, sub);
+          item.append(kind, body);
+          tiles.append(item);
+        });
+      }
+
+      function choose(entryId) {
+        selected = entryId;
+        const doc = documents.find((d) => d.entry_id === entryId);
+        scope.textContent = doc ? `Asking about: ${doc.display_name}` : "Asking about all manuals";
+        renderShelf();
+      }
+
+      async function loadShelf() {
+        const status = $("shelf-status");
+        try {
+          const response = await fetch("/demo/documents", { headers: { Accept: "application/json" } });
+          if (!response.ok) throw new Error(await errorMessage(response));
+          documents = await response.json();
+          renderShelf();
+          status.hidden = documents.length > 0;
+          if (!documents.length) status.textContent = "The shelf is empty right now.";
+        } catch (error) {
+          status.textContent = error.message || "The manuals couldn't be loaded. Please try again later.";
+          setBusy(false, true);
+        }
+      }
+
+      // ---------- Chat ----------
+
+      function addMessage(kind) {
+        $("empty")?.remove();
+        reset.hidden = false;
+        const message = document.createElement("div");
+        message.className = `msg ${kind}`;
+        thread.append(message);
+        return message;
+      }
+
+      function scrollDown() {
+        thread.scrollTop = thread.scrollHeight;
+      }
+
+      function setBusy(value, unavailable = false) {
+        busy = value;
+        send.disabled = value || unavailable;
+        input.disabled = unavailable;
+        send.textContent = value ? "Thinking…" : "Ask";
+      }
+
+      async function errorMessage(response) {
+        try {
+          const body = await response.json();
+          if (typeof body.detail === "string") return body.detail;
+          if (response.status === 422) return "That question is too long. Try something shorter.";
+        } catch {}
+        return "Something went wrong. Please try again.";
+      }
+
+      function showWorking(container) {
+        const working = document.createElement("div");
+        working.className = "working";
+        const flips = document.createElement("div");
+        flips.className = "flips idle";
+        for (let i = 0; i < PROGRESS_TILES; i++) flips.append(document.createElement("span"));
+        const step = document.createElement("div");
+        step.className = "step";
+        step.textContent = "Opening the manuals…";
+        working.append(flips, step);
+        container.append(working);
+        let lit = 0;
+        return {
+          advance(text) {
+            flips.classList.remove("idle");
+            if (lit < PROGRESS_TILES) flips.children[lit++].classList.add("on");
+            step.textContent = text.replace(/^[^\p{L}\p{N}]+/u, "");
+          },
+          remove() { working.remove(); },
+        };
+      }
+
+      function finishAnswer(message, answerEl, result) {
+        answerEl.innerHTML = renderAnswer(result.answer || "");
+        const urgent = result.should_escalate || ["high", "critical"].includes(result.urgency_level);
+        if (urgent) {
+          message.classList.add("safety");
+          const band = document.createElement("div");
+          band.className = "band";
+          const label = document.createElement("span");
+          label.textContent = "Safety first";
+          band.append(label);
+          message.prepend(band);
+        }
+        const sources = result.sources || [];
+        if (sources.length) {
+          const list = document.createElement("div");
+          list.className = "sources";
+          const label = document.createElement("span");
+          label.className = "label";
+          label.textContent = "From the shelf";
+          list.append(label);
+          for (const source of sources) {
+            const text = source.page ? `${source.display_name} · p. ${source.page}` : source.display_name;
+            const href = source.url && safeUrl(source.url);
+            const tag = document.createElement(href ? "a" : "span");
+            tag.className = "source";
+            tag.textContent = text;
+            if (href) {
+              tag.href = source.page ? `${href}#page=${source.page}` : href;
+              tag.target = "_blank";
+              tag.rel = "noopener noreferrer";
+            }
+            list.append(tag);
+          }
+          message.append(list);
+        }
+      }
+
+      async function ask(question) {
+        if (busy) return;
+        question = question.trim();
+        if (!question) return;
+        setBusy(true);
+        input.value = "";
+        autosize();
+
+        addMessage("you").textContent = question;
+        const message = addMessage("buddy");
+        const answerEl = document.createElement("div");
+        answerEl.className = "answer";
+        const working = showWorking(message);
+        message.append(answerEl);
+        scrollDown();
+
+        let streamed = "";
+        let final = null;
+        let failure = null;
+        try {
+          const response = await fetch("/demo/query/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+            body: JSON.stringify({ question, entry_id: selected, history: history.slice(-MAX_HISTORY) }),
+          });
+          if (!response.ok || !response.body) throw new Error(await errorMessage(response));
+
+          const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+          let buffer = "";
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += value;
+            let cut;
+            while ((cut = buffer.indexOf("\n\n")) !== -1) {
+              const chunk = buffer.slice(0, cut);
+              buffer = buffer.slice(cut + 2);
+              for (const line of chunk.split("\n")) {
+                if (!line.startsWith("data: ")) continue;
+                const event = JSON.parse(line.slice(6));
+                if (event.type === "status") {
+                  working.advance(event.message || "");
+                } else if (event.type === "token") {
+                  streamed += event.text || "";
+                  answerEl.innerHTML = renderAnswer(streamed);
+                } else if (event.type === "final") {
+                  final = event.result;
+                } else if (event.type === "error") {
+                  failure = event.message;
+                }
+              }
+              scrollDown();
+            }
+          }
+          if (!final && !failure) failure = "The answer was cut off. Please try again.";
+        } catch (error) {
+          failure = error.message || "Couldn't reach Home Buddy. Check your connection and try again.";
+        }
+
+        working.remove();
+        if (final) {
+          finishAnswer(message, answerEl, final);
+          history.push({ role: "user", content: question }, { role: "assistant", content: (final.answer || "").slice(0, 4000) });
+          history = history.slice(-MAX_HISTORY);
+        } else {
+          message.classList.add("failed");
+          answerEl.textContent = failure;
+        }
+        scrollDown();
+        setBusy(false);
+        input.focus();
+      }
+
+      function startOver() {
+        history = [];
+        thread.replaceChildren(emptyState());
+        reset.hidden = true;
+        input.focus();
+      }
+
+      function emptyState() {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.id = "empty";
+        const lead = document.createElement("p");
+        lead.textContent = "Not sure where to start? Try one of these:";
+        const chips = document.createElement("div");
+        chips.className = "chips";
+        SUGGESTIONS.forEach((text, index) => {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "chip";
+          chip.style.setProperty("--chip", tint(PALETTE[(index + 3) % PALETTE.length]));
+          chip.textContent = text;
+          chip.addEventListener("click", () => ask(text));
+          chips.append(chip);
+        });
+        empty.append(lead, chips);
+        return empty;
+      }
+
+      function autosize() {
+        input.style.height = "auto";
+        input.style.height = `${Math.min(input.scrollHeight, 144)}px`;
+      }
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        ask(input.value);
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+          event.preventDefault();
+          ask(input.value);
+        }
+      });
+      input.addEventListener("input", autosize);
+      reset.addEventListener("click", startOver);
+
+      buildHouse();
+      $("empty").replaceWith(emptyState());
+      loadShelf();
+    })();
+  </script>
+</body>
+</html>

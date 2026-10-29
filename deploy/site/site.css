@@ -1,0 +1,241 @@
+/*
+  Home Buddy site styles: the tokens, fonts and shared pieces (masthead, footer, buttons)
+  used by every page in deploy/site. "Tile & Gable": bright tiles, thick ink outlines and
+  hard offset shadows on cream paper. Retune the look here, not in the pages.
+*/
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("fonts/bricolage-grotesque-latin-standard-normal.woff2") format("woff2");
+  font-weight: 200 800;
+  font-stretch: 75% 100%;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Space Mono";
+  src: url("fonts/space-mono-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Space Mono";
+  src: url("fonts/space-mono-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+
+  /* The six tile colours. Text on a tile is always ink. */
+  --sky: #66aaee;
+  --peri: #bbddff;
+  --gold: #dd9900;
+  --lime: #ccff00;
+  --pink: #ff00cc;
+  --aqua: #00ccaa;
+
+  --ink-fixed: #17153b;
+  --paper: #fff8ec;
+  --surface: #ffffff;
+  --ink: #17153b;
+  --muted: #4a4770;
+  --line: #17153b;
+  --shadow: #17153b;
+  --checker: color-mix(in srgb, var(--peri) 38%, transparent);
+  --focus: var(--pink);
+
+  --font-display: "Bricolage Grotesque", ui-rounded, system-ui, sans-serif;
+  --font-body: "Bricolage Grotesque", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Space Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --step--1: 0.85rem;
+  --step-0: 1rem;
+  --step-1: 1.2rem;
+  --step-2: 1.6rem;
+  --step-3: clamp(2rem, 4.5vw, 2.8rem);
+  --step-4: clamp(2.6rem, 7vw, 4.6rem);
+
+  --border: 3px solid var(--line);
+  --radius: 14px;
+  --lift: 5px;
+  --hard-shadow: var(--lift) var(--lift) 0 var(--shadow);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --paper: #121030;
+    --surface: #1e1b46;
+    --ink: #fff4e0;
+    --muted: #c9c3e6;
+    --line: #fff4e0;
+    --shadow: var(--sky);
+    --checker: color-mix(in srgb, var(--sky) 12%, transparent);
+    --focus: var(--lime);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+/* Tilted ribbons and stickers poke past the edges; never let them scroll the page sideways. */
+body { overflow-x: clip; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 var(--step-0)/1.6 var(--font-body);
+  font-optical-sizing: auto;
+}
+
+a { color: inherit; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--pink); }
+
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+
+[hidden] { display: none !important; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- Masthead: tile-house mark, wordmark, coming-soon sticker ---------- */
+
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.1rem 1rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  text-decoration: none;
+  font: 800 var(--step-1)/1 var(--font-display);
+  font-stretch: 85%;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+/* The mark: a gable of tiles over a square of tiles, mirrored left to right. */
+.mark {
+  display: grid;
+  grid-template-columns: repeat(4, 9px);
+  grid-auto-rows: 9px;
+  gap: 2px;
+}
+.mark span { border-radius: 2px; background: var(--sky); }
+.mark .r1 { background: var(--pink); }
+.mark .r2 { background: var(--gold); }
+.mark .door { background: var(--ink); }
+.mark .win { background: var(--lime); }
+
+.sticker {
+  display: inline-block;
+  padding: 0.35rem 0.75rem;
+  border: var(--border);
+  border-radius: 999px;
+  background: var(--lime);
+  color: var(--ink-fixed);
+  box-shadow: 3px 3px 0 var(--shadow);
+  font: 700 var(--step--1)/1.2 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transform: rotate(-3deg);
+  white-space: nowrap;
+}
+
+/* ---------- Buttons ---------- */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.65rem 1.1rem;
+  border: var(--border);
+  border-radius: var(--radius);
+  background: var(--pink);
+  color: var(--ink-fixed);
+  box-shadow: 4px 4px 0 var(--shadow);
+  font: 700 var(--step-0)/1 var(--font-body);
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.button:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--shadow); }
+.button:active { transform: translate(4px, 4px); box-shadow: 0 0 0 var(--shadow); }
+.button:disabled { cursor: not-allowed; opacity: 0.55; transform: none; box-shadow: 4px 4px 0 var(--shadow); }
+.button.quiet { background: var(--surface); color: var(--ink); }
+
+/* ---------- Checkered footer ---------- */
+
+.site-footer {
+  margin-top: 4rem;
+  border-top: var(--border);
+  background:
+    repeating-conic-gradient(var(--checker) 0 25%, transparent 0 50%) 0 0 / 32px 32px,
+    var(--paper);
+}
+.site-footer .inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 2rem;
+  font-size: var(--step--1);
+}
+.site-footer nav { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; font-family: var(--font-mono); }
+.site-footer p { margin: 0; color: var(--muted); }
+
+/* ---------- Long-form pages (privacy, terms, delete account) ---------- */
+
+.page {
+  max-width: 44rem;
+  margin: 1rem auto 0;
+  padding: 2rem 1.5rem 2.5rem;
+  border: var(--border);
+  border-radius: calc(var(--radius) + 6px);
+  background: var(--surface);
+  box-shadow: var(--hard-shadow);
+}
+@media (max-width: 47rem) {
+  .page { margin: 1rem 16px 0; padding: 1.5rem 1.1rem 2rem; }
+}
+.page h1 {
+  margin: 0 0 0.25rem;
+  font: 800 var(--step-3)/1.05 var(--font-display);
+  font-stretch: 85%;
+  letter-spacing: -0.02em;
+}
+.page h2 {
+  margin: 2rem 0 0.5rem;
+  padding-top: 1.25rem;
+  border-top: 2px dashed color-mix(in srgb, var(--line) 35%, transparent);
+  font: 750 var(--step-1)/1.25 var(--font-display);
+}
+.page .meta { margin-top: 0; color: var(--muted); font: 400 var(--step--1)/1.5 var(--font-mono); }
+.page li { margin-bottom: 0.4rem; }
+.page .callout {
+  padding: 0.85rem 1rem;
+  border: var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--gold) 22%, var(--surface));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .sticker { transform: none; }
+}
