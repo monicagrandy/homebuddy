@@ -99,13 +99,6 @@ class Settings:
     # Oldest app version the API still supports; older apps ask the user to update.
     min_android_version = os.getenv("MIN_ANDROID_VERSION", "1.0.0")
     db_max_overflow = _int_env("DB_MAX_OVERFLOW", 20)
-    # Public demo on homebuddy.chat: a household with no members holding public manuals.
-    # 0 turns the demo off.
-    demo_household_id = _int_env("DEMO_HOUSEHOLD_ID", 0)
-    # Per-visitor (IP) limits, plus a daily ceiling across all visitors; 0 turns a limit off.
-    demo_queries_per_minute = _int_env("DEMO_QUERIES_PER_MINUTE", 3)
-    demo_queries_per_visitor_per_day = _int_env("DEMO_QUERIES_PER_VISITOR_PER_DAY", 20)
-    demo_queries_per_day = _int_env("DEMO_QUERIES_PER_DAY", 300)
 
     @property
     def is_production(self) -> bool:

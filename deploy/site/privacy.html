@@ -9,22 +9,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Home Buddy Privacy Policy</title>
-  <link rel="stylesheet" href="site.css">
+  <style>
+    :root { color-scheme: light dark; --text: #1f2933; --muted: #52606d; --bg: #fbfaf7; --rule: #e4e0d8; }
+    @media (prefers-color-scheme: dark) { :root { --text: #e6e2da; --muted: #a8a29a; --bg: #1c1b19; --rule: #36332f; } }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 42rem; margin: 0 auto; padding: 2.5rem 1rem 4rem; }
+    h1 { font-size: 1.9rem; margin-bottom: 0.25rem; }
+    h2 { font-size: 1.2rem; margin-top: 2rem; border-top: 1px solid var(--rule); padding-top: 1.25rem; }
+    .meta { color: var(--muted); }
+    li { margin-bottom: 0.35rem; }
+  </style>
 </head>
 <body>
-<header class="masthead">
-  <a class="brand" href="./" aria-label="Home Buddy home">
-    <span class="mark" aria-hidden="true">
-      <i></i><span class="r1"></span><span class="r1"></span><i></i>
-      <span class="r2"></span><span class="r2"></span><span class="r2"></span><span class="r2"></span>
-      <span></span><span class="win"></span><span class="win"></span><span></span>
-      <span></span><span class="door"></span><span class="door"></span><span></span>
-    </span>
-    Home Buddy
-  </a>
-  <span class="sticker">Mobile app coming soon</span>
-</header>
-<main class="page">
+<main>
   <h1>Privacy Policy</h1>
   <p class="meta">Home Buddy · Effective October 2026</p>
 
@@ -37,7 +34,6 @@
     <li><strong>Documents you add:</strong> PDF files you upload, links you add (including links scanned from QR codes), and the text we extract from them to answer questions. Before that text is indexed, we remove some personal identifiers it contains: Social Security numbers, card numbers, bank account numbers and email addresses.</li>
     <li><strong>Questions and answers:</strong> your chat history. The same identifiers are removed from questions before they are saved.</li>
     <li><strong>Voice input (apps):</strong> when you dictate a question, your phone's speech recognition turns it into text. On supported phones this happens on the device; otherwise your phone's speech service (for example Google) processes the audio. Home Buddy only receives the resulting text, which you review before sending.</li>
-    <li><strong>Website demo:</strong> questions you type into the demo on homebuddy.chat are used only to answer them and aren't saved by Home Buddy. Your IP address is kept in server memory for up to a day to limit how many questions each visitor can ask.</li>
     <li><strong>Technical information:</strong> the app version and standard server logs (such as IP address and request time) used to keep the service running and secure.</li>
   </ul>
   <p>We don't sell your information, show ads, or use your documents to train AI models.</p>
@@ -73,7 +69,7 @@
   <p>You can delete your account and all of its data at any time:</p>
   <ul>
     <li>In the app: <strong>Account → Delete account</strong>.</li>
-    <li>Without the app: follow the steps at <a href="https://homebuddy.chat/delete-account">homebuddy.chat/delete-account</a>.</li>
+    <li>On the web: <a href="https://homebuddy.chat/?page=delete-account">homebuddy.chat/?page=delete-account</a>, then <strong>My Profile → Delete account</strong>.</li>
   </ul>
   <p>This deletes your household, its documents and your chat history on every device, then closes your sign-in account. You can also delete individual documents and chats at any time.</p>
 
@@ -86,16 +82,5 @@
   <h2>Contact</h2>
   <p>Questions about privacy: [add a contact email address before publishing].</p>
 </main>
-<footer class="site-footer">
-  <div class="inner">
-    <nav aria-label="Legal">
-      <a href="./">Try the demo</a>
-      <a href="privacy">Privacy</a>
-      <a href="terms">Terms</a>
-      <a href="delete-account">Delete account</a>
-    </nav>
-    <p>Home Buddy · The mobile app is coming soon.</p>
-  </div>
-</footer>
 </body>
 </html>

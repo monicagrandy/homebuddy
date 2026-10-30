@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -45,20 +45,6 @@ class QueryRequest(BaseModel):
     household_id: Optional[int] = None
     asset_id: Optional[int] = None
     household_zip_code: Optional[str] = None
-
-class DemoMessage(BaseModel):
-    """An earlier turn of a demo chat; the page keeps the history, nothing is saved."""
-
-    role: Literal["user", "assistant"]
-    content: str = Field(max_length=4000)
-
-
-class DemoQueryRequest(BaseModel):
-    question: str = Field(min_length=1, max_length=1000)
-    entry_id: Optional[str] = None
-    # The same window the signed-in routes load from a saved conversation.
-    history: list[DemoMessage] = Field(default_factory=list, max_length=4)
-
 
 class QueryResponse(BaseModel):
     answer: str

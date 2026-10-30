@@ -1,28 +1,17 @@
-# homebuddy.chat is the public demo: static pages from deploy/site, plus the backend's
-# /demo routes. The signed-in Streamlit web app is switched off (see the end of this block).
+# Replace ":80" with your real domain name once DNS points at this server.
+# Example:
+# homebuddy.example.com {
+#   encode gzip zstd
+#   reverse_proxy frontend:8501
+# }
+#
+# When you switch from ":80" to a real domain, Caddy will automatically
+# request and renew HTTPS certificates for you.
+
 homebuddy.chat {
-    # Compress the pages, but not /demo: compression would buffer streamed (SSE) answers.
-    @pages not path /demo/*
-    encode @pages gzip zstd
+    encode gzip zstd
 
-    # Public demo API (no sign-in, limited per visitor). Questions are small JSON.
-    handle /demo/* {
-        request_body {
-            max_size 64KB
-        }
-        reverse_proxy backend:8000 {
-            flush_interval -1
-        }
-    }
-
-    # The old web app's account deletion link, still used by the Play Console form.
-    @old_delete_link {
-        path /
-        query page=delete-account
-    }
-    redir @old_delete_link /delete-account 301
-
-    # Static pages (deploy/site), linked from the app stores and the apps.
+    # Static policy pages (deploy/site), linked from the app stores and the apps.
     handle /privacy {
         root * /srv/site
         rewrite * /privacy.html
@@ -33,25 +22,10 @@ homebuddy.chat {
         rewrite * /terms.html
         file_server
     }
-    handle /delete-account {
-        root * /srv/site
-        rewrite * /delete-account.html
-        file_server
-    }
 
     handle {
-        root * /srv/site
-        try_files {path} /index.html
-        file_server
+        reverse_proxy frontend:8501
     }
-
-    # To bring back the signed-in Streamlit app, start it with
-    # `docker compose -f docker-compose.aws.yml --profile web-app up -d` and replace the
-    # catch-all handle above with:
-    #
-    # handle {
-    #     reverse_proxy frontend:8501
-    # }
 }
 
 # Public API for the native apps. This is the only site that reaches the backend.
