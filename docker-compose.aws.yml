@@ -25,11 +25,18 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-homebuddy}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env before starting Docker Compose.}@db:5432/${POSTGRES_DB:-home_buddy}
       VECTOR_STORE_PROVIDER: pgvector
+      ENVIRONMENT: production
+      # Caddy is the only way in and sets X-Forwarded-For itself, so trust it for the
+      # visitor's IP (the demo's per-visitor limits key on it).
+      FORWARDED_ALLOW_IPS: "*"
     depends_on:
       db:
         condition: service_healthy
 
+  # The signed-in Streamlit web app is switched off; homebuddy.chat is the static demo.
+  # Start it with `--profile web-app` (and see deploy/Caddyfile) to bring it back.
   frontend:
+    profiles: ["web-app"]
     build:
       context: .
       dockerfile: Dockerfile
@@ -47,13 +54,14 @@ services:
     image: caddy:2
     restart: unless-stopped
     depends_on:
-      frontend:
+      backend:
         condition: service_started
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/site:/srv/site:ro
       - caddy_data:/data
       - caddy_config:/config
 

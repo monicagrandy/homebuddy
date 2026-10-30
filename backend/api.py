@@ -2,13 +2,16 @@ import asyncio
 import json
 import secrets
 import threading
+import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from datetime import datetime, time
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import AIMessage, HumanMessage
 from langsmith.run_helpers import tracing_context
 from openai import APIConnectionError, APITimeoutError, RateLimitError
@@ -35,6 +38,7 @@ from backend.dependencies import (
 from backend.guardrails.guardrails import SafetyBlockError
 from backend.ingestion.loader import DocumentLoadError
 from backend.ingestion.pipeline import IngestionCancelled
+from backend.rate_limit import demo_rate_limited
 from backend.models import (
     Asset,
     Case,
@@ -57,6 +61,8 @@ from backend.schemas import (
     CaseUpdate,
     CaseOut,
     ConversationMessageOut,
+    DemoMessage,
+    DemoQueryRequest,
     DocumentIndexResponse,
     DocumentOut,
     HouseholdCreate,
@@ -320,7 +326,7 @@ def _load_full_conversation_history(
     ).all()
 
 
-def _to_langchain_messages(history: list[ConversationMessage]):
+def _to_langchain_messages(history: list[ConversationMessage] | list[DemoMessage]):
     messages = []
     for message in history:
         if message.role == "user":
@@ -1059,3 +1065,87 @@ def query_stream(
                
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# Public demo (homebuddy.chat): no sign-in, answers from the demo household's public manuals only.
+# The household is fixed by DEMO_HOUSEHOLD_ID and never taken from the request, and nothing is saved.
+
+_DEMO_UNEXPECTED_ERROR_MESSAGE = "Something went wrong while answering. Please try again."
+
+def _demo_household(session: Session) -> Household:
+    household = session.get(Household, settings.demo_household_id) if settings.demo_household_id else None
+    if household is None:
+        raise HTTPException(status_code=404, detail="The demo isn't available right now.")
+    return household
+
+
+@app.get("/demo/documents", response_model=list[DocumentOut])
+def demo_documents(session: Session = Depends(get_session)):
+    household = _demo_household(session)
+    documents = session.scalars(
+        select(Document).where(Document.household_id == household.id).order_by(Document.id)
+    ).all()
+    return [
+        DocumentOut(
+            id=document.id,
+            entry_id=document.entry_id,
+            display_name=document.source_name,
+            download_url=document.source_url,
+            doc_type=document.doc_type,
+            uploaded_at=document.uploaded_at,
+        )
+        for document in documents
+    ]
+
+
+@app.post("/demo/query/stream", dependencies=[Depends(demo_rate_limited)])
+def demo_query_stream(
+    payload: DemoQueryRequest,
+    service: QueryService = Depends(get_query_service),
+    session: Session = Depends(get_session),
+):
+    household = _demo_household(session)
+    household_id = household.id
+    household_zip_code = household.zip_code
+    if payload.entry_id is not None and session.scalar(
+        select(Document.id).where(Document.household_id == household_id, Document.entry_id == payload.entry_id)
+    ) is None:
+        raise HTTPException(status_code=404, detail="That manual isn't part of the demo.")
+
+    prior_messages = _to_langchain_messages(payload.history)
+    trace_tags = ["homebuddy", "demo", "query:stream"]
+    trace_metadata = {"query_mode": "stream", "household_id": household_id, "entry_id": payload.entry_id}
+
+    def event_stream():
+        try:
+            with tracing_context(tags=trace_tags, metadata=trace_metadata):
+                for event in service.stream_query(
+                    user_query=payload.question,
+                    user_id=None,
+                    session_id=f"demo-{uuid.uuid4()}",
+                    entry_id=payload.entry_id,
+                    household_id=household_id,
+                    household_zip_code=household_zip_code,
+                    messages=prior_messages,
+                ):
+                    yield f"data: {json.dumps(jsonable_encoder(event))}\n\n"
+        except (ValueError, SafetyBlockError, QueryEngineError) as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': _streaming_query_error_message(exc)})}\n\n"
+        except (RateLimitError, APIConnectionError, APITimeoutError) as exc:
+            logger.warning("Demo query hit temporary AI provider error: %s", exc)
+            yield f"data: {json.dumps({'type': 'error', 'message': _streaming_query_error_message(exc)})}\n\n"
+        except Exception:
+            # Unexpected errors can carry internal details, so visitors only get a generic message.
+            logger.exception("Demo query failed")
+            yield f"data: {json.dumps({'type': 'error', 'message': _DEMO_UNEXPECTED_ERROR_MESSAGE})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+if settings.environment == "development":
+    # Caddy serves deploy/site in production; locally the demo page is at http://localhost:8000/site/.
+    app.mount("/site", StaticFiles(directory=Path(__file__).resolve().parent.parent / "deploy" / "site", html=True))

@@ -78,7 +78,9 @@ def build_home_operations_subgraph(agent_llm, tools_by_name):
         results = []
         for tc in last.tool_calls:
             name, args = tc["name"], tc["args"]
-            if name == "get_contractor_suggestions" and "requesting_user_id" not in args:
+            if name == "get_contractor_suggestions":
+                # Always the signed-in user from graph state, never a value the model wrote: text in a
+                # question could otherwise make it spend another user's contractor search quota.
                 args = {**args, "requesting_user_id": state.get("requesting_user_id")}
             try:
                 out = (

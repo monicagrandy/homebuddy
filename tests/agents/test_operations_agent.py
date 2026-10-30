@@ -153,3 +153,39 @@ def test_operations_node_surfaces_quota_note_when_lookup_is_blocked():
 
     assert "reached the 10 search limit for August 2026" in command.update["operations_response"][0]["response"]
     assert command.update["contractor_suggestions"] == []
+
+
+def test_contractor_lookup_always_uses_the_requesting_user_from_state():
+    from langchain_core.messages import AIMessage
+
+    from backend.agents.operations import build_home_operations_subgraph
+
+    class ToolCallingLLM:
+        def invoke(self, messages):
+            # As if text in the question talked the model into naming another user.
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call-1",
+                        "name": "get_contractor_suggestions",
+                        "args": {"trade": "hvac", "zip_code": "90032", "requesting_user_id": 7},
+                    }
+                ],
+            )
+
+    class RecordingTool:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def invoke(self, args):
+            self.calls.append(args)
+            return "[]"
+
+    tool = RecordingTool()
+    graph = build_home_operations_subgraph(ToolCallingLLM(), {"get_contractor_suggestions": tool})
+
+    graph.invoke({"messages": [], "requesting_user_id": None})
+    graph.invoke({"messages": [], "requesting_user_id": 12})
+
+    assert [call["requesting_user_id"] for call in tool.calls] == [None, 12]

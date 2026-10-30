@@ -14,8 +14,8 @@ Why this path:
 
 - 1 Lightsail Linux instance
 - Docker Compose running:
-  - `frontend` for Streamlit
   - `backend` for FastAPI
+  - `frontend` for Streamlit, which is switched off: it only starts with `--profile web-app` (see "The public demo" below)
   - `db` using PostgreSQL with `pgvector`
   - `caddy` as the reverse proxy
 - 1 static IP
@@ -165,14 +165,22 @@ Because HomeBuddy requires Cognito sign-in, set up the domain before your first 
 2. Point an `A` record at the Lightsail static IP.
 3. Update [`deploy/Caddyfile`](../deploy/Caddyfile) so the site label is your real domain instead of `:80`.
 
-Example:
+The `homebuddy.chat` block serves the public demo: the static page in `deploy/site` and the backend's `/demo` routes.
 
-```caddyfile
-homebuddy.yourdomain.com {
-    encode gzip zstd
-    reverse_proxy frontend:8501
-}
-```
+### The public demo
+
+homebuddy.chat is a demo page with no sign-in. Visitors ask the real agent about a few public appliance manuals and see the mobile app is coming soon. The signed-in Streamlit app is switched off but kept in the repo.
+
+1. Caddy serves `deploy/site/index.html` at `/` and forwards `/demo/*` to the backend, unbuffered and uncompressed so answers stream. `FORWARDED_ALLOW_IPS=*` gives the backend the visitor's IP from Caddy.
+2. Index the manuals into a demo household. It has no members, so only the `/demo` routes can read it:
+
+   ```bash
+   docker compose -f docker-compose.aws.yml exec backend python scripts/load_demo_documents.py --create-household --apply
+   ```
+
+   Put the id it prints in `.env` as `DEMO_HOUSEHOLD_ID`, then restart the backend with `docker compose -f docker-compose.aws.yml up -d backend`. Later runs of `python scripts/load_demo_documents.py --apply` only add manuals that are missing.
+3. Visitors get 3 questions a minute and 20 a day, and the whole demo stops at 300 a day (UTC). Change them with `DEMO_QUERIES_PER_MINUTE`, `DEMO_QUERIES_PER_VISITOR_PER_DAY` and `DEMO_QUERIES_PER_DAY`. The counts live in memory, so a restart resets them.
+4. To bring back the signed-in web app, start it with `docker compose -f docker-compose.aws.yml --profile web-app up -d` and switch the Caddyfile back to `reverse_proxy frontend:8501` (the comment at the end of the `homebuddy.chat` block shows how).
 
 ## Step 5: Configure Cognito before launch
 
@@ -219,7 +227,7 @@ Useful follow-up commands:
 docker compose -f docker-compose.aws.yml ps
 docker compose -f docker-compose.aws.yml logs -f
 docker compose -f docker-compose.aws.yml logs -f backend
-docker compose -f docker-compose.aws.yml logs -f frontend
+docker compose -f docker-compose.aws.yml logs -f caddy
 ```
 
 ## Step 7: Smoke test the deployment
@@ -230,13 +238,13 @@ Visit:
 https://YOUR_DOMAIN
 ```
 
-You should see the Streamlit UI through Caddy.
+You should see the demo page with the manuals on its shelf, and a question should stream an answer. `https://YOUR_DOMAIN/demo/documents` should list the manuals.
 
 If something fails:
 
 1. Check `docker compose ... ps`
 2. Check backend logs
-3. Check frontend logs
+3. Check Caddy logs
 4. Check the database container logs
 
 If you updated DNS or Cognito values after the first launch, restart:
