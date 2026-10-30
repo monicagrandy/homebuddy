@@ -81,6 +81,15 @@ class Settings:
     contractor_suggestion_limit = _int_env("CONTRACTOR_SUGGESTION_LIMIT", 3)
     contractor_search_monthly_limit = _int_env("CONTRACTOR_SEARCH_MONTHLY_LIMIT", 10)
     openai_max_retries = _int_env("OPENAI_MAX_RETRIES", 2)
+    # "development" also serves the demo pages at /site (Caddy serves them in production).
+    environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+    # Public demo on homebuddy.chat: a household with no members holding public manuals.
+    # 0 turns the demo off.
+    demo_household_id = _int_env("DEMO_HOUSEHOLD_ID", 0)
+    # Per-visitor (IP) limits, plus a daily ceiling across all visitors; 0 turns a limit off.
+    demo_queries_per_minute = _int_env("DEMO_QUERIES_PER_MINUTE", 3)
+    demo_queries_per_visitor_per_day = _int_env("DEMO_QUERIES_PER_VISITOR_PER_DAY", 20)
+    demo_queries_per_day = _int_env("DEMO_QUERIES_PER_DAY", 300)
     reasoning_effort = "none"
 
     def _build_chat_model(self, *, model: str, temperature: float) -> ChatOpenAI:
